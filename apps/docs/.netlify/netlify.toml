@@ -1,0 +1,41 @@
+redirectsOrigin = "config"
+plugins = []
+headers = []
+
+[functions]
+
+[functions."*"]
+
+[build]
+publish = "/Users/gabrielmoreno/Documents/ChatGPT/netlify-test/apps/docs/dist"
+publishOrigin = "config"
+commandOrigin = "config"
+base = "/Users/gabrielmoreno/Documents/ChatGPT/netlify-test/apps/docs"
+command = "bun run build"
+
+[build.environment]
+BUN_VERSION = "1.3.10"
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[[redirects]]
+from = "/"
+to = "/docs/"
+status = 302.0
+force = false
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]

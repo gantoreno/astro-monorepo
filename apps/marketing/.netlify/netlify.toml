@@ -1,0 +1,53 @@
+redirectsOrigin = "config"
+plugins = []
+headers = []
+
+[functions]
+
+[functions."*"]
+
+[build]
+publish = "/Users/gabrielmoreno/Documents/ChatGPT/netlify-test/apps/marketing/dist"
+publishOrigin = "config"
+commandOrigin = "config"
+base = "/Users/gabrielmoreno/Documents/ChatGPT/netlify-test/apps/marketing"
+command = "bun run build"
+
+[build.environment]
+BUN_VERSION = "1.3.10"
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[[redirects]]
+from = "/docs"
+to = "https://candid-mousse-4e49ec.netlify.app/docs/"
+status = 200.0
+force = true
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]
+
+[[redirects]]
+from = "/docs/*"
+to = "https://candid-mousse-4e49ec.netlify.app/docs/:splat"
+status = 200.0
+force = true
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]

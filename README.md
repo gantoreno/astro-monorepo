@@ -1,19 +1,17 @@
 # Astro + Bun: marketing and docs
 
-Two independently deployable Astro 7 applications in a Bun workspace. Both prerender their pages at build time using Astro's static output; no SSR adapter is needed for Netlify or Vercel. Pages are authored as `.astro` components with a shared layout and stylesheet within each app.
+Two independently deployable Astro 7 applications in a Bun workspace. Both prerender their pages at build time using Astro's static output; no SSR adapter is needed for Vercel. Pages are authored as `.astro` components with a shared layout and stylesheet within each app.
 
 ```text
 apps/
   marketing/
     astro.config.mjs
-    netlify.toml
     vercel.json
     src/pages/           # /, /about, /pricing, custom 404
     src/layouts/
     src/styles/
   docs/
     astro.config.mjs
-    netlify.toml
     vercel.json
     src/pages/docs/      # /docs, /docs/getting-started, /docs/guides/deployment
     src/pages/404.astro
@@ -53,7 +51,7 @@ bun run test              # Build, then run all tests
 bun run preview           # Serve both existing builds with the docs proxy
 ```
 
-`bun run preview` defaults to ports 3000 and 3001 and accepts the same port environment variables. Stop the dev servers first or select different ports. This preview serves the generated files and models slashless routing; it is not a full Netlify/Vercel emulator. Each app also supports `bun run preview` for its own Astro preview server.
+`bun run preview` defaults to ports 3000 and 3001 and accepts the same port environment variables. Stop the dev servers first or select different ports. This preview serves the generated files and models slashless routing; it is not a full Vercel emulator. Each app also supports `bun run preview` for its own Astro preview server.
 
 ## Routes without trailing slashes
 
@@ -69,38 +67,7 @@ This generates `about.html`, `docs.html`, and `docs/getting-started.html`, rathe
 
 Docs pages explicitly live in `src/pages/docs`; an extra `base: "/docs"` setting would duplicate the prefix. Docs uses `build.assets: "docs/_astro"` to keep Astro's generated CSS/JS within the proxied namespace. Place additional public docs assets under `apps/docs/public/docs/` and link to them with `/docs/...` URLs. See [Astro's build configuration](https://docs.astro.build/en/reference/configuration-reference/#buildformat).
 
-Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`. Netlify's Pretty URLs processing is disabled so it does not add trailing slashes. Netlify may still accept slash-ending aliases: its redirect engine normalizes paths before matching and cannot safely enforce slash removal with a `/path/ → /path` rule. Do not add those rules, which can loop. See [Netlify's trailing-slash behavior](https://docs.netlify.com/manage/routing/redirects/redirect-options/#trailing-slash).
-
-## Deploy to Netlify
-
-Create two projects from this repository in the same Netlify team. Set the package directory for each project so Netlify finds its `netlify.toml`:
-
-| Setting | Docs | Marketing |
-| --- | --- | --- |
-| Package directory | `apps/docs` | `apps/marketing` |
-| Base directory | Repository root | Repository root |
-| Build command | `bun run build:docs` | `bun run build:marketing` |
-| Publish directory | `apps/docs/dist` | `apps/marketing/dist` |
-
-The configs explicitly select the repository root for installation/builds, preserving the shared Bun lockfile. They also select Node.js 24 and Bun 1.3.10. See [Netlify's monorepo configuration](https://docs.netlify.com/build/configure-builds/monorepos/).
-
-Deploy docs first, then marketing. The existing docs hostname in marketing's TOML has been preserved. Update both proxy destinations if you create a different docs project.
-
-```toml
-[[redirects]]
-  from = "/docs"
-  to = "https://YOUR-DOCS-SITE.netlify.app/docs"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/docs/*"
-  to = "https://YOUR-DOCS-SITE.netlify.app/docs/:splat"
-  status = 200
-  force = true
-```
-
-These are rewrites: the browser stays on marketing's domain. The docs domain's `/` redirects to `/docs` as a convenience. Both sites must be in the same team, and the docs target must be accessible to the proxy. See [Netlify proxy limitations](https://docs.netlify.com/manage/routing/redirects/rewrites-proxies/).
+Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`.
 
 ## Deploy to Vercel
 
@@ -140,7 +107,7 @@ Redeploy **docs first**, then marketing: older docs deployments still have the p
 
 On marketing's domain, test `/`, `/about`, `/pricing`, `/docs`, `/docs/getting-started`, and `/docs/guides/deployment`. Open a nested docs URL directly and refresh it. Check that its generated `/docs/_astro/*.css` stylesheet loads through marketing. A missing docs page should return a docs 404.
 
-For Vercel, also verify that `/about/` and `/docs/getting-started/` redirect to the corresponding slashless URL on the marketing domain. For Netlify, verify the canonical slashless pages load without being redirected to slash-ending URLs.
+Also verify that `/about/` and `/docs/getting-started/` redirect to the corresponding slashless URL on the marketing domain.
 
 ```sh
 curl -i https://YOUR-MARKETING-DOMAIN/docs
