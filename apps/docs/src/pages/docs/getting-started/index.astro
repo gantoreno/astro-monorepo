@@ -1,0 +1,18 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+---
+<Layout title="Getting started — Acme Docs">
+  <p><a href="/docs">Documentation</a> / Getting started</p>
+  <h1>Your first few minutes.</h1>
+  <h2>Run locally</h2>
+  <pre><code>bun install{"\n"}bun run dev</code></pre>
+  <p>Open <code>http://localhost:3000</code>. Documentation is available at <code>/docs</code> on the same address, or directly at <code>http://localhost:3001/docs</code>.</p>
+  <h2>Add a page</h2>
+  <p>Marketing pages live in <code>apps/marketing/src/pages</code>. Documentation pages live in <code>apps/docs/src/pages/docs</code>.</p>
+  <p>Add an <code>.astro</code> file and use the app's shared layout. For example, <code>src/pages/docs/guides/example.astro</code> becomes <code>/docs/guides/example</code>.</p>
+  <p>Keep documentation links and public assets under <code>/docs/</code>. Page links have no trailing slash.</p>
+  <h2>Build</h2>
+  <pre><code>bun run build</code></pre>
+  <p>Astro generates HTML and CSS in each app's <code>dist</code> directory. Routes use file output, such as <code>docs/getting-started.html</code>, served as <code>/docs/getting-started</code>.</p>
+  <p><a href="/docs/guides/deployment">Next: deployment →</a></p>
+</Layout>

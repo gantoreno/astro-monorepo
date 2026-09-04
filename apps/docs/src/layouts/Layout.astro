@@ -1,0 +1,33 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description } = Astro.props;
+const currentPath = Astro.url.pathname.replace(/\.html$/, "").replace(/\/$/, "") || "/";
+const links = [{ href: "/docs/getting-started", label: "Getting started" }, { href: "/docs/guides/deployment", label: "Deployment" }];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    {description && <meta name="description" content={description} />}
+    <title>{title}</title>
+  </head>
+  <body>
+    <header>
+      <a href="/docs">Acme / Docs</a>
+      <nav aria-label="Documentation">
+        {links.map(({ href, label }) => (
+          <a href={href} aria-current={currentPath === href ? "page" : undefined}>{label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+    <footer>Acme · Documentation</footer>
+  </body>
+</html>

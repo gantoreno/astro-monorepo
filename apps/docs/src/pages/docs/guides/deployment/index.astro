@@ -1,0 +1,19 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+---
+<Layout title="Deployment — Acme Docs">
+  <p><a href="/docs">Documentation</a> / Guides / Deployment</p>
+  <h1>Two deploys. One address.</h1>
+  <ol>
+    <li>Create separate docs and marketing projects on Netlify or Vercel.</li>
+    <li>Choose <code>apps/docs</code> and <code>apps/marketing</code> as the respective app directories. Each app builds with <code>bun run build</code> and publishes <code>dist</code>.</li>
+    <li>Deploy docs first and open its domain followed by <code>/docs</code>.</li>
+    <li>Set the docs hostname in marketing's <code>netlify.toml</code> or <code>vercel.json</code>, then deploy marketing.</li>
+  </ol>
+  <h2>How routing works</h2>
+  <p>Marketing serves its own Astro pages. Requests to <code>/docs</code> and <code>/docs/*</code> are proxied to the docs project. The marketing domain stays in the address bar.</p>
+  <p>Astro-generated docs assets live under <code>/docs/_astro</code>, so they travel through the same proxy.</p>
+  <h2>URLs without trailing slashes</h2>
+  <p>Both apps use <code>trailingSlash: "never"</code> and <code>build.format: "file"</code>. Use links such as <code>/about</code> and <code>/docs/getting-started</code>.</p>
+  <p>The repository README contains platform settings, CLI instructions, and deployment checks.</p>
+</Layout>

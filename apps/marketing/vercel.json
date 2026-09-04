@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "astro",
+  "installCommand": "bun install --frozen-lockfile",
+  "buildCommand": "bun run build",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/docs",
+      "destination": "https://docs-black-alpha-47.vercel.app/docs"
+    },
+    {
+      "source": "/docs/:path*",
+      "destination": "https://docs-black-alpha-47.vercel.app/docs/:path*"
+    }
+  ]
+}

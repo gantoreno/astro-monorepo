@@ -1,0 +1,25 @@
+# Select apps/marketing as this Netlify project's package directory.
+[build]
+  base = "/"
+  command = "bun run build:marketing"
+  publish = "apps/marketing/dist"
+
+[build.environment]
+  BUN_VERSION = "1.3.10"
+  NODE_VERSION = "24"
+
+# Astro emits page.html files; do not turn their links into page/ URLs.
+[build.processing.html]
+  pretty_urls = false
+
+[[redirects]]
+  from = "/docs"
+  to = "https://candid-mousse-4e49ec.netlify.app/docs"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/docs/*"
+  to = "https://candid-mousse-4e49ec.netlify.app/docs/:splat"
+  status = 200
+  force = true
