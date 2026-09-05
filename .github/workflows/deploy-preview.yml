@@ -17,6 +17,8 @@ env:
   VERCEL_CLI_VERSION: "59.11.7"
   ASTRO_TELEMETRY_DISABLED: "1"
   PR_BRANCH: ${{ github.head_ref }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
 defaults:
   run:
@@ -47,6 +49,8 @@ jobs:
           # Both jobs build the same PR merge commit.
           ref: ${{ github.sha }}
           persist-credentials: false
+          # Fetch both parents so the real PR head message is available.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -77,7 +81,19 @@ jobs:
       - name: Deploy docs
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$PR_HEAD_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$PR_BRANCH" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
       - name: Check docs is publicly accessible
         env:
@@ -114,6 +130,8 @@ jobs:
           # Both jobs build the same PR merge commit.
           ref: ${{ github.sha }}
           persist-credentials: false
+          # Fetch both parents so the real PR head message is available.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -161,7 +179,19 @@ jobs:
       - name: Deploy marketing
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$PR_HEAD_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$PR_BRANCH" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
       - name: Check marketing and proxied docs
         env:

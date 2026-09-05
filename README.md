@@ -137,6 +137,12 @@ Runs for the same PR are serialized so alias updates cannot overlap; different P
 
 Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel repository secrets. The workflow uses `pull_request`, never `pull_request_target`, to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
 
+### Deployment labels in Vercel
+
+Both workflows pass explicit [GitHub metadata to Vercel](https://vercel.com/kb/guide/branch-variables-and-domains-not-linked-to-cli-deployments). Preview deployments show only the head commit subject, with the actual PR branch and head commit, instead of the generated merge message and detached `HEAD`. Production deployments show only the commit subject, with `main` and its deployed commit. The branch label comes from explicit metadata, independently of whether the checkout is detached.
+
+Preview builds still use GitHub's PR merge commit to test the change together with the base branch. The displayed head commit identifies the contributor's change; `ciBuildSha` records the exact commit that was built, and `ciRunUrl` links to the Actions run attempt. Existing deployments keep their original labels; new deployments receive these fields.
+
 ### Manual CLI deployment
 
 Use the same local-build/prebuilt-deploy flow as CI. Starting at the repository root:

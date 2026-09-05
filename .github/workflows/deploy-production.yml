@@ -67,7 +67,19 @@ jobs:
       - name: Deploy docs
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$GITHUB_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$GITHUB_REF_NAME" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Docs deployment: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
       - name: Check docs is publicly accessible
@@ -141,7 +153,19 @@ jobs:
       - name: Deploy marketing
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$GITHUB_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$GITHUB_REF_NAME" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Marketing deployment: %s\nDocs origin: %s\n' "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
       - name: Check marketing and proxied docs
