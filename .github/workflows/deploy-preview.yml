@@ -3,20 +3,23 @@ name: Deploy PR preview to Vercel
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
+  pull-requests: read
 
-# New commits (or closing the PR) cancel older runs for this PR only.
+# Shared with cleanup-preview.yml so deployments and cleanup cannot overlap.
 concurrency:
   group: vercel-preview-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   VERCEL_CLI_VERSION: "59.11.7"
   ASTRO_TELEMETRY_DISABLED: "1"
   PR_BRANCH: ${{ github.head_ref }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
 defaults:
   run:
@@ -26,7 +29,6 @@ jobs:
   docs:
     # Forks and Dependabot do not receive the Vercel repository secrets.
     if: >-
-      github.event.action != 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.actor != 'dependabot[bot]'
@@ -42,17 +44,32 @@ jobs:
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     steps:
+      - name: Check PR is still open and current
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
       - uses: actions/checkout@v4
         with:
           # Both jobs build the same PR merge commit.
           ref: ${{ github.sha }}
           persist-credentials: false
+          # Fetch both parents so the real PR head message is available.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
+      - name: Test preview lifecycle workflows
+        run: bun test ../../tests/cleanup-preview.test.js
       - name: Check deployment secrets
         run: |
           : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
@@ -77,16 +94,29 @@ jobs:
       - name: Deploy docs
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$PR_HEAD_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "ciRepositoryId=$GITHUB_REPOSITORY_ID" \
+            --meta "ciPullRequest=$PR_NUMBER" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$PR_BRANCH" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
-          printf 'Docs preview: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
       - name: Check docs is publicly accessible
         env:
           DOCS_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")"
+          status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")" || true
           if [[ "$status" != "200" ]]; then
-            echo "::error::Docs returned HTTP $status. Its deployment URL must be public for the marketing proxy. Check the docs project's Deployment Protection settings."
+            echo "::error::Docs returned HTTP $status after retries. Check its routes and Deployment Protection; the deployment URL must be public for the marketing proxy."
             exit 1
           fi
 
@@ -94,10 +124,7 @@ jobs:
     needs: docs
     permissions:
       contents: read
-      deployments: write
-    environment:
-      name: preview-pr-${{ github.event.pull_request.number }}
-      url: ${{ steps.deploy.outputs.url }}
+      pull-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -114,6 +141,8 @@ jobs:
           # Both jobs build the same PR merge commit.
           ref: ${{ github.sha }}
           persist-credentials: false
+          # Fetch both parents so the real PR head message is available.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -161,6 +190,93 @@ jobs:
       - name: Deploy marketing
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$PR_HEAD_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "ciRepositoryId=$GITHUB_REPOSITORY_ID" \
+            --meta "ciPullRequest=$PR_NUMBER" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$PR_BRANCH" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
-          printf 'Marketing preview: %s\nDocs through marketing: %s/docs\nDocs origin: %s\n' "$url" "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check marketing and proxied docs
+        env:
+          MARKETING_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for path in / /about /docs /docs/getting-started; do
+            status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
+            if [[ "$status" != "200" ]]; then
+              echo "::error::Marketing route $path returned HTTP $status instead of 200."
+              exit 1
+            fi
+          done
+      - name: Update permanent PR preview URL
+        id: alias
+        env:
+          MARKETING_URL: ${{ steps.deploy.outputs.url }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          # Do not replace the alias with an old rerun or a closed PR's deployment.
+          node --input-type=module <<'JS'
+          const { GITHUB_REPOSITORY, GH_TOKEN, PR_NUMBER, PR_HEAD_SHA } = process.env;
+          const response = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}`, {
+            headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: "application/vnd.github+json" },
+          });
+          if (!response.ok) throw new Error(`Cannot check the PR: HTTP ${response.status}`);
+          const pr = await response.json();
+          if (pr.state !== "open" || pr.head.sha !== PR_HEAD_SHA) {
+            throw new Error("This preview is outdated or the PR is closed; keeping the existing preview URL unchanged.");
+          }
+          JS
+          # Repository ID avoids collisions with similarly named projects in other repos.
+          host="marketing-pr-$PR_NUMBER-$REPOSITORY_ID.vercel.app"
+          vercel alias set "$MARKETING_URL" "$host" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          printf 'url=https://%s\n' "$host" >> "$GITHUB_OUTPUT"
+          printf 'Preview: https://%s\nDocumentation: https://%s/docs\n' "$host" "$host" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish preview comment
+        uses: actions/github-script@v8
+        env:
+          PREVIEW_URL: ${{ steps.alias.outputs.url }}
+        with:
+          script: |
+            const marker = "<!-- vercel-pr-preview -->";
+            const { PREVIEW_URL, PR_HEAD_SHA, GITHUB_SERVER_URL } = process.env;
+            const repositoryUrl = `${GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}`;
+            const body = [
+              marker,
+              `**Preview ready:** [Open preview](${PREVIEW_URL}) · [Documentation](${PREVIEW_URL}/docs)`,
+              "",
+              `Commit: [${PR_HEAD_SHA.slice(0, 7)}](${repositoryUrl}/commit/${PR_HEAD_SHA}) · [Workflow run](${repositoryUrl}/actions/runs/${context.runId})`,
+            ].join("\n");
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === "github-actions[bot]" &&
+              comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

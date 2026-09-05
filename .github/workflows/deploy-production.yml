@@ -67,16 +67,28 @@ jobs:
       - name: Deploy docs
         id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$GITHUB_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$GITHUB_REF_NAME" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Docs deployment: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
       - name: Check docs is publicly accessible
         env:
           DOCS_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")"
+          status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")" || true
           if [[ "$status" != "200" ]]; then
-            echo "::error::Docs returned HTTP $status. Its deployment URL must be public for the marketing proxy. Check the docs project's Deployment Protection settings."
+            echo "::error::Docs returned HTTP $status after retries. Check its routes and Deployment Protection; the deployment URL must be public for the marketing proxy."
             exit 1
           fi
 
@@ -139,6 +151,31 @@ jobs:
       - name: Build marketing
         run: vercel build --prod --token="$VERCEL_TOKEN"
       - name: Deploy marketing
+        id: deploy
         run: |
-          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          commit_sha="$GITHUB_SHA"
+          commit_subject="$(git log -1 --format=%s "$commit_sha")"
+          commit_author="$(git log -1 --format=%an "$commit_sha")"
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" \
+            --meta "githubDeployment=1" \
+            --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
+            --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
+            --meta "githubCommitRef=$GITHUB_REF_NAME" \
+            --meta "githubCommitSha=$commit_sha" \
+            --meta "githubCommitMessage=$commit_subject" \
+            --meta "githubCommitAuthorName=$commit_author" \
+            --meta "ciBuildSha=$GITHUB_SHA" \
+            --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Marketing deployment: %s\nDocs origin: %s\n' "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check marketing and proxied docs
+        env:
+          MARKETING_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for path in / /about /docs /docs/getting-started; do
+            status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
+            if [[ "$status" != "200" ]]; then
+              echo "::error::Marketing route $path returned HTTP $status instead of 200."
+              exit 1
+            fi
+          done

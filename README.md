@@ -67,7 +67,7 @@ This generates `about.html`, `docs.html`, and `docs/getting-started.html`, rathe
 
 Docs pages explicitly live in `src/pages/docs`; an extra `base: "/docs"` setting would duplicate the prefix. Docs uses `build.assets: "docs/_astro"` to keep Astro's generated CSS/JS within the proxied namespace. Place additional public docs assets under `apps/docs/public/docs/` and link to them with `/docs/...` URLs. See [Astro's build configuration](https://docs.astro.build/en/reference/configuration-reference/#buildformat).
 
-Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`.
+Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`. Marketing explicitly rewrites `/` to `/index` because Vercel's prebuilt output exposes `index.html` at `/index` when clean URLs are enabled. This keeps the homepage at `/` and avoids a root 404.
 
 ## Deploy to Vercel
 
@@ -87,7 +87,7 @@ Each app's `vercel.json` supplies its framework, commands, output, and routing s
 
 [`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) deploys both apps whenever a commit is pushed or merged to `main`. It can also be started manually from the Actions tab with `main` selected; other branches are skipped.
 
-The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap.
+The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap. Both workflows check the live marketing homepage, `/about`, `/docs`, and `/docs/getting-started` after deployment.
 
 In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
 
@@ -127,15 +127,29 @@ Each run checks out the same PR merge commit in both jobs and follows this seque
 1. In `apps/docs`, pull Vercel's **Preview** settings (including overrides for the PR branch), build, and deploy without `--prod`.
 2. Confirm the docs preview responds publicly at `/docs`.
 3. In `apps/marketing`, fill both docs rewrites with that exact docs preview URL, then build and deploy using marketing's Preview settings.
-4. Publish marketing's URL through the GitHub environment `preview-pr-<number>` and list both URLs in the Actions summary. Visiting `/docs` on that marketing preview serves the matching docs preview.
+4. After the live checks pass, point `marketing-pr-<number>-<repository-id>.vercel.app` at the new marketing deployment using `vercel alias set`. Create or update a single bot comment on the PR with that stable address and its `/docs` link. The Actions summary also includes these links.
 
-Each successful update creates new Vercel deployment URLs. The GitHub environment keeps the same name and its deployment link points to the latest successful preview; there is no permanent Vercel hostname per PR. Production domains remain unchanged. Older marketing previews keep pointing to their original docs deployments.
+The preview address stays the same across successful updates, so bookmarks and shared links follow the latest published version of that PR. The repository ID in the hostname prevents naming collisions between repositories. No extra domain, DNS configuration, or secret is required. Vercel still creates deployment-specific URLs underneath, which remain visible in deployment logs; the workflow uses the exact docs deployment URL internally to keep each marketing build paired with the correct docs build. The shared preview links use only the stable marketing alias and its `/docs` path. Production domains remain unchanged. See [Vercel aliases](https://vercel.com/docs/cli/alias).
 
-The docs project's Deployment Protection must allow public access to **preview deployment URLs**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. GitHub creates the per-PR environment automatically; keep the four credentials as repository secrets so they are available to both jobs. Environment rules, if added, must permit PR refs.
+The docs project's Deployment Protection must allow public access to **preview deployment URLs**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. Keep the four credentials as repository secrets so they are available to both jobs. The comment uses the automatic `GITHUB_TOKEN` with `pull-requests: write`; no additional token or secret is needed. The workflow does not create GitHub deployment records or environments. Any records from earlier runs remain in GitHub history.
 
-New commits cancel older workflow runs for the same PR; different PRs deploy independently. Closing or merging the PR cancels an in-flight preview run without creating another preview. Existing GitHub environments and Vercel deployments are retained after closure; cleanup is not configured. A failed update does not remove the previous successful deployment.
+Runs for the same PR are serialized so alias updates cannot overlap; different PRs deploy independently. Before moving the alias, the workflow checks that the PR is still open and the deployment matches its current head commit. Outdated reruns and runs for closed PRs fail that check without moving the alias. Closing or merging a PR runs the separate cleanup workflow described below. A failed build or live check leaves the previous alias target and preview comment unchanged.
 
-Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel repository secrets. The workflow uses `pull_request`, never `pull_request_target`, to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
+Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel repository secrets. The deployment workflow uses `pull_request` to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
+
+### Cleaning up closed PR previews
+
+[`.github/workflows/cleanup-preview.yml`](.github/workflows/cleanup-preview.yml) runs only on `pull_request_target: closed`, which includes merging a PR. It runs trusted inline code from `main`, with no checkout or execution of PR code. It does not add cleanup jobs to the preview workflow that runs when a PR is opened or updated. The cleanup workflow must reach `main` before it can handle closures. See [GitHub's event behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target).
+
+Both preview deploy commands tag Vercel deployments with `ciRepositoryId` and `ciPullRequest`. Cleanup removes the PR's permanent marketing alias, then deletes matching preview deployments from both configured projects, including previous runs. It checks both metadata fields and the project ID, excludes production/promoted deployments, and updates the existing bot comment to **Preview closed**. It uses the same four repository secrets; no GitHub environment or deployment record is created.
+
+Cleanup and deployment share the same per-PR concurrency group. Cleanup rechecks that the PR is closed before deleting, while preview runs reject closed or outdated PRs before deploying. Reopening the PR creates a new pair at the same permanent URL. Rerunning cleanup tolerates an alias or deployment that has already been removed; other API errors fail the run so it can be retried. Deployments created before the tags were added remain untouched, as do historical GitHub deployment records.
+
+### Deployment labels in Vercel
+
+Both workflows pass explicit [GitHub metadata to Vercel](https://vercel.com/kb/guide/branch-variables-and-domains-not-linked-to-cli-deployments). Preview deployments show only the head commit subject, with the actual PR branch and head commit, instead of the generated merge message and detached `HEAD`. Production deployments show only the commit subject, with `main` and its deployed commit. The branch label comes from explicit metadata, independently of whether the checkout is detached.
+
+Preview builds still use GitHub's PR merge commit to test the change together with the base branch. The displayed head commit identifies the contributor's change; `ciBuildSha` records the exact commit that was built, and `ciRunUrl` links to the Actions run attempt. Existing deployments keep their original labels; new deployments receive these fields.
 
 ### Manual CLI deployment
 
