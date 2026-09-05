@@ -12,5 +12,8 @@
       "destination": "/docs",
       "permanent": false
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": false
+  }
 }

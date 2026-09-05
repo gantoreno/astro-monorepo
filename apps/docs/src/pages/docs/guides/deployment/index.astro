@@ -6,9 +6,9 @@ import Layout from "../../../../layouts/Layout.astro";
   <h1>Two deploys. One address.</h1>
   <ol>
     <li>Create separate docs and marketing projects on Vercel.</li>
-    <li>Choose <code>apps/docs</code> and <code>apps/marketing</code> as the respective app directories. Each app builds with <code>bun run build</code> and publishes <code>dist</code>.</li>
-    <li>Deploy docs first and open its domain followed by <code>/docs</code>.</li>
-    <li>Set the docs hostname in marketing's <code>vercel.json</code>, then deploy marketing.</li>
+    <li>Leave each Vercel project's Root Directory empty. The workflow runs inside <code>apps/docs</code> or <code>apps/marketing</code>, builds with that app's <code>vercel.json</code>, and uploads its generated artifacts.</li>
+    <li>Add the four Vercel repository secrets listed in the README to GitHub Actions.</li>
+    <li>Push to <code>main</code>. The workflow deploys docs, fills marketing's <code>vercel.json</code> with that deployment URL, then deploys marketing.</li>
   </ol>
   <h2>How routing works</h2>
   <p>Marketing serves its own Astro pages. Requests to <code>/docs</code> and <code>/docs/*</code> are proxied to the docs project. The marketing domain stays in the address bar.</p>

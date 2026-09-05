@@ -1,0 +1,144 @@
+name: Deploy production to Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Finish each docs/marketing pair before starting another production release.
+concurrency:
+  group: vercel-production
+  cancel-in-progress: false
+
+env:
+  VERCEL_CLI_VERSION: "59.11.7"
+  ASTRO_TELEMETRY_DISABLED: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  docs:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/docs
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Check deployment secrets
+        run: |
+          : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
+          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository secret}"
+          : "${VERCEL_PROJECT_ID:?Set the VERCEL_DOCS_PROJECT_ID repository secret}"
+      - name: Install Vercel CLI
+        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
+      - name: Pull production settings
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Check Vercel root directory
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from "node:fs";
+          const project = JSON.parse(readFileSync(".vercel/project.json", "utf8"));
+          const root = project.settings?.rootDirectory;
+          if (root && root !== "." && root !== "./") {
+            throw new Error(`Clear Root Directory in this Vercel project's settings (currently ${root}). CI already runs inside the app directory.`);
+          }
+          JS
+      - name: Build docs
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+      - name: Deploy docs
+        id: deploy
+        run: |
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+          printf 'Docs deployment: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check docs is publicly accessible
+        env:
+          DOCS_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")"
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Docs returned HTTP $status. Its deployment URL must be public for the marketing proxy. Check the docs project's Deployment Protection settings."
+            exit 1
+          fi
+
+  marketing:
+    needs: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/marketing
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
+      DOCS_URL: ${{ needs.docs.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Check deployment secrets
+        run: |
+          : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
+          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository secret}"
+          : "${VERCEL_PROJECT_ID:?Set the VERCEL_MARKETING_PROJECT_ID repository secret}"
+      - name: Install Vercel CLI
+        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
+      - name: Point marketing at this run's docs deployment
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const url = new URL(process.env.DOCS_URL);
+          if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+            throw new Error("Expected a public HTTPS docs deployment origin");
+          }
+          const path = "vercel.json";
+          const config = JSON.parse(readFileSync(path, "utf8"));
+          for (const source of ["/docs", "/docs/:path*"]) {
+            const rule = config.rewrites.find((rewrite) => rewrite.source === source);
+            if (!rule) throw new Error(`Missing rewrite for ${source}`);
+            rule.destination = `${url.origin}${source}`;
+          }
+          writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+          JS
+      - name: Pull production settings
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Check Vercel root directory
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from "node:fs";
+          const project = JSON.parse(readFileSync(".vercel/project.json", "utf8"));
+          const root = project.settings?.rootDirectory;
+          if (root && root !== "." && root !== "./") {
+            throw new Error(`Clear Root Directory in this Vercel project's settings (currently ${root}). CI already runs inside the app directory.`);
+          }
+          JS
+      - name: Build marketing
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+      - name: Deploy marketing
+        run: |
+          url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          printf 'Marketing deployment: %s\nDocs origin: %s\n' "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"

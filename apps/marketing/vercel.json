@@ -15,5 +15,8 @@
       "source": "/docs/:path*",
       "destination": "https://docs-black-alpha-47.vercel.app/docs/:path*"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": false
+  }
 }

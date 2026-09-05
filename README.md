@@ -71,33 +71,76 @@ Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless 
 
 ## Deploy to Vercel
 
-Create two projects from this repository:
+Create or reuse two Vercel projects in the same account/team. No Git repository connection is required:
 
 | Setting | Docs | Marketing |
 | --- | --- | --- |
-| Root Directory | `apps/docs` | `apps/marketing` |
+| Root Directory | Leave empty (`./`) | Leave empty (`./`) |
 | Framework Preset | Astro | Astro |
 | Install Command | `bun install --frozen-lockfile` | `bun install --frozen-lockfile` |
 | Build Command | `bun run build` | `bun run build` |
 | Output Directory | `dist` | `dist` |
 
-The app's `vercel.json` supplies its framework, commands, output, and routing settings. Keep **Include source files outside of the Root Directory in the Build Step** enabled to make the workspace manifest and lockfile available. The apps now build with `astro build` directly and no longer need the old parent `scripts/build.js`.
+Each app's `vercel.json` supplies its framework, commands, output, and routing settings. Each deployment runs inside its app directory, so leave the Vercel project's **Root Directory empty (`./`)**. If you previously set it to `apps/docs` or `apps/marketing`, clear it: otherwise Vercel would append that path again. The workflow checks this before building. The full repository is checked out in GitHub Actions, so Bun can access the parent workspace manifest and lockfile while building locally; only the built artifacts are uploaded to Vercel.
 
-For CLI deployment with these project settings, run from the repository root:
+### Production from GitHub Actions
+
+[`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) deploys both apps whenever a commit is pushed or merged to `main`. It can also be started manually from the Actions tab with `main` selected; other branches are skipped.
+
+The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap.
+
+In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Repository secret | Value |
+| --- | --- |
+| `VERCEL_TOKEN` | A [Vercel access token](https://vercel.com/account/tokens) with access to both projects. |
+| `VERCEL_ORG_ID` | The shared Vercel account/team ID (`orgId` in `.vercel/project.json`). |
+| `VERCEL_DOCS_PROJECT_ID` | The docs project's ID (`projectId` in its link file). |
+| `VERCEL_MARKETING_PROJECT_ID` | The marketing project's ID (`projectId` in its link file). |
+
+Retrieve the IDs from the Vercel dashboard or run these commands **from the repository root** to link each app independently:
 
 ```sh
+vercel login
+vercel link --cwd apps/docs --project docs
+cat apps/docs/.vercel/project.json
+vercel link --cwd apps/marketing --project marketing
+cat apps/marketing/.vercel/project.json
+```
+
+Add `--scope YOUR-TEAM` to the link commands if necessary. Linking the CLI does not require connecting the GitHub repository. For new projects, you can create them first with `vercel project add docs` and `vercel project add marketing`. Set their Root Directories and build settings as listed above before the first workflow run.
+
+Leave both projects disconnected under Vercel's **Settings → Git**. Both app configs also set `git.deploymentEnabled: false` to prevent automatic Git deployments if a connection is added later; CLI deployments still work.
+
+For docs, disable Vercel Authentication/other Deployment Protection that restricts deployment URLs. The proxy uses the unique deployment URL, which [Standard Protection can restrict even when the production domain is public](https://vercel.com/docs/deployment-protection). Public access to only the stable docs domain is insufficient. The workflow stops before deploying marketing if docs returns a non-200 response.
+
+Keep docs deployments that are still referenced by active or rollback marketing deployments; deleting one breaks its paired marketing deployment. If marketing fails, its current production deployment remains active, while docs may already have been deployed. Rerun the workflow to retry the pair. Deployment URLs appear in the Actions run summary.
+
+This uses [Vercel's CLI deployment flow for GitHub Actions](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel). No Vercel GitHub integration, deploy hook, or extra GitHub token is required. This workflow handles production only; it does not create PR previews.
+
+### Manual CLI deployment
+
+Use the same local-build/prebuilt-deploy flow as CI. Starting at the repository root:
+
+```sh
+cd apps/docs
 vercel link --project docs
-vercel --prod
+vercel pull --yes --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
 ```
 
-Verify the docs production domain at `/docs`. Marketing's JSON preserves the previously configured docs hostname; update both rewrite destinations if the docs domain changes. Then select and deploy marketing from the same directory:
+Copy the resulting docs deployment URL into both rewrite destinations in `apps/marketing/vercel.json`, preserving `/docs` and `/docs/:path*`. Then switch from the docs directory to marketing:
 
 ```sh
+cd ../marketing
 vercel link --project marketing
-vercel --prod
+vercel pull --yes --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
 ```
 
-Add `--scope YOUR-TEAM` if needed. If your terminal is inside an app, use `--cwd ../..` on both commands. The repository root has one active project link, so relink before switching apps. See [Vercel's monorepo CLI instructions](https://vercel.com/docs/monorepos#add-a-monorepo-through-vercel-cli).
+Add `--scope YOUR-TEAM` to linking commands if needed. Each app keeps its own project link, so switching directories selects the corresponding project. Keep the entire monorepo on disk for Bun's workspace dependencies. These commands build locally before upload; a plain `vercel --prod` source upload from one app directory would omit the parent workspace files.
 
 Use a docs production URL accessible without a Vercel login. Protected previews can return an authentication page. Standard Vercel rewrites also give existing files precedence, so keep the `/docs` namespace out of marketing's pages and public directory.
 
@@ -117,4 +160,4 @@ curl -i https://YOUR-MARKETING-DOMAIN/docs/not-a-real-page
 
 Expect 200 for existing canonical pages and 404 for the missing page. No response should redirect to the docs hostname.
 
-Preview deployments currently use the docs hostname committed in the platform config. They do not automatically pair docs and marketing previews for a PR. A CI workflow can deploy docs first and inject its deployment URL into marketing's configuration before deploying marketing.
+Preview deployments currently use the docs hostname committed in the platform config. They do not automatically pair docs and marketing previews for a PR. The production GitHub Actions workflow pairs deployments this way on `main`; PR previews are not configured.
