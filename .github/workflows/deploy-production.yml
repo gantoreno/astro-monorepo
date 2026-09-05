@@ -74,9 +74,9 @@ jobs:
         env:
           DOCS_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")"
+          status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")" || true
           if [[ "$status" != "200" ]]; then
-            echo "::error::Docs returned HTTP $status. Its deployment URL must be public for the marketing proxy. Check the docs project's Deployment Protection settings."
+            echo "::error::Docs returned HTTP $status after retries. Check its routes and Deployment Protection; the deployment URL must be public for the marketing proxy."
             exit 1
           fi
 
@@ -149,7 +149,7 @@ jobs:
           MARKETING_URL: ${{ steps.deploy.outputs.url }}
         run: |
           for path in / /about /docs /docs/getting-started; do
-            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")"
+            status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
             if [[ "$status" != "200" ]]; then
               echo "::error::Marketing route $path returned HTTP $status instead of 200."
               exit 1
