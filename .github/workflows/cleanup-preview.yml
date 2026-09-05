@@ -1,0 +1,133 @@
+name: Clean up PR preview on Vercel
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  pull-requests: write
+
+# Shared with deploy-preview.yml; let an active deployment finish first.
+concurrency:
+  group: vercel-preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Run trusted inline code from main; never check out or execute PR code.
+      - name: Remove preview alias and tagged deployments
+        uses: actions/github-script@v8
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_DOCS_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+          VERCEL_MARKETING_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        with:
+          script: |
+            const env = process.env;
+            const pullNumber = context.issue.number;
+            const prParams = { ...context.repo, pull_number: pullNumber };
+            async function isClosed() {
+              const { data: pr } = await github.rest.pulls.get(prParams);
+              return pr.state === "closed";
+            }
+            if (!await isClosed()) {
+              core.info("PR was reopened; leaving its preview unchanged.");
+              return;
+            }
+            for (const key of ["VERCEL_TOKEN", "VERCEL_ORG_ID", "VERCEL_DOCS_PROJECT_ID", "VERCEL_MARKETING_PROJECT_ID", "REPOSITORY_ID"]) {
+              if (!env[key]) throw new Error(`Missing ${key}`);
+            }
+            if (!/^\d+$/.test(env.REPOSITORY_ID) || !Number.isSafeInteger(pullNumber) || pullNumber <= 0) {
+              throw new Error("Expected numeric repository and PR identifiers.");
+            }
+            async function vercel(path, { method = "GET", query = {}, missingOK = false } = {}) {
+              const url = new URL(path, "https://api.vercel.com");
+              url.search = new URLSearchParams({ teamId: env.VERCEL_ORG_ID, ...query });
+              const response = await fetch(url, {
+                method,
+                headers: { Authorization: `Bearer ${env.VERCEL_TOKEN}` },
+                signal: AbortSignal.timeout(30_000),
+              });
+              if (missingOK && response.status === 404) return null;
+              if (!response.ok) throw new Error(`Vercel ${method} ${path}: HTTP ${response.status}`);
+              if (response.status === 204) return null;
+              return response.json();
+            }
+            function matches(deployment, projectId) {
+              return deployment.projectId === projectId &&
+                (deployment.target == null || deployment.target === "preview") &&
+                deployment.readySubstate !== "PROMOTED" &&
+                deployment.meta?.ciRepositoryId === env.REPOSITORY_ID &&
+                deployment.meta?.ciPullRequest === String(pullNumber);
+            }
+            // Collect every page before deleting, so pagination is stable.
+            const candidates = new Map();
+            for (const projectId of new Set([env.VERCEL_MARKETING_PROJECT_ID, env.VERCEL_DOCS_PROJECT_ID])) {
+              let until;
+              const cursors = new Set();
+              do {
+                const page = await vercel("/v7/deployments", {
+                  query: { projectId, limit: "100", ...(until ? { until } : {}) },
+                });
+                for (const deployment of page.deployments) {
+                  if (matches(deployment, projectId)) {
+                    if (!deployment.uid) throw new Error("Deployment is missing its ID.");
+                    candidates.set(deployment.uid, projectId);
+                  }
+                }
+                until = page.pagination?.next;
+                if (until != null) {
+                  until = String(until);
+                  if (cursors.has(until)) throw new Error("Vercel pagination repeated a cursor.");
+                  cursors.add(until);
+                }
+              } while (until != null);
+            }
+            const host = `marketing-pr-${pullNumber}-${env.REPOSITORY_ID}.vercel.app`;
+            const alias = await vercel(`/v4/aliases/${encodeURIComponent(host)}`, { missingOK: true });
+            if (alias && (alias.projectId !== env.VERCEL_MARKETING_PROJECT_ID || alias.alias !== host || !alias.uid)) {
+              throw new Error("Preview alias does not belong to the expected marketing project.");
+            }
+            async function requireClosed() {
+              if (!await isClosed()) throw new Error("PR was reopened; stopping cleanup.");
+            }
+            await requireClosed();
+            if (alias) {
+              await vercel(`/v2/aliases/${encodeURIComponent(alias.uid)}`, { method: "DELETE", missingOK: true });
+            }
+            let deleted = 0;
+            for (const [id, projectId] of candidates) {
+              await requireClosed();
+              const path = `/v13/deployments/${encodeURIComponent(id)}`;
+              const deployment = await vercel(path, { missingOK: true });
+              if (!deployment) continue;
+              // Recheck ownership and target in case a deployment was promoted.
+              if (!matches(deployment, projectId)) throw new Error(`Deployment ${id} no longer matches this preview.`);
+              await vercel(path, { method: "DELETE", missingOK: true });
+              deleted++;
+            }
+            await requireClosed();
+            const marker = "<!-- vercel-pr-preview -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: pullNumber,
+              per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === "github-actions[bot]" && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body: `${marker}\n**Preview closed.** The permanent preview URL has been removed. Reopening this PR creates a new preview at the same address.`,
+              });
+            }
+            await core.summary.addRaw(`Removed the PR #${pullNumber} preview alias and ${deleted} tagged deployments.\n`).write();

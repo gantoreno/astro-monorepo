@@ -3,12 +3,13 @@ name: Deploy PR preview to Vercel
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
+  pull-requests: read
 
-# Serialize updates to each PR alias; different PRs still deploy independently.
+# Shared with cleanup-preview.yml so deployments and cleanup cannot overlap.
 concurrency:
   group: vercel-preview-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -28,7 +29,6 @@ jobs:
   docs:
     # Forks and Dependabot do not receive the Vercel repository secrets.
     if: >-
-      github.event.action != 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.actor != 'dependabot[bot]'
@@ -44,6 +44,17 @@ jobs:
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     steps:
+      - name: Check PR is still open and current
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
       - uses: actions/checkout@v4
         with:
           # Both jobs build the same PR merge commit.
@@ -57,6 +68,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
+      - name: Test preview lifecycle workflows
+        run: bun test ../../tests/cleanup-preview.test.js
       - name: Check deployment secrets
         run: |
           : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
@@ -86,6 +99,8 @@ jobs:
           commit_author="$(git log -1 --format=%an "$commit_sha")"
           url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
             --meta "githubDeployment=1" \
+            --meta "ciRepositoryId=$GITHUB_REPOSITORY_ID" \
+            --meta "ciPullRequest=$PR_NUMBER" \
             --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
             --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
             --meta "githubCommitRef=$PR_BRANCH" \
@@ -180,6 +195,8 @@ jobs:
           commit_author="$(git log -1 --format=%an "$commit_sha")"
           url="$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" \
             --meta "githubDeployment=1" \
+            --meta "ciRepositoryId=$GITHUB_REPOSITORY_ID" \
+            --meta "ciPullRequest=$PR_NUMBER" \
             --meta "githubCommitOrg=${GITHUB_REPOSITORY%/*}" \
             --meta "githubCommitRepo=${GITHUB_REPOSITORY#*/}" \
             --meta "githubCommitRef=$PR_BRANCH" \
