@@ -139,6 +139,19 @@ jobs:
       - name: Build marketing
         run: vercel build --prod --token="$VERCEL_TOKEN"
       - name: Deploy marketing
+        id: deploy
         run: |
           url="$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")"
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Marketing deployment: %s\nDocs origin: %s\n' "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check marketing and proxied docs
+        env:
+          MARKETING_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for path in / /about /docs /docs/getting-started; do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")"
+            if [[ "$status" != "200" ]]; then
+              echo "::error::Marketing route $path returned HTTP $status instead of 200."
+              exit 1
+            fi
+          done

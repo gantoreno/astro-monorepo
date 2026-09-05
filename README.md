@@ -67,7 +67,7 @@ This generates `about.html`, `docs.html`, and `docs/getting-started.html`, rathe
 
 Docs pages explicitly live in `src/pages/docs`; an extra `base: "/docs"` setting would duplicate the prefix. Docs uses `build.assets: "docs/_astro"` to keep Astro's generated CSS/JS within the proxied namespace. Place additional public docs assets under `apps/docs/public/docs/` and link to them with `/docs/...` URLs. See [Astro's build configuration](https://docs.astro.build/en/reference/configuration-reference/#buildformat).
 
-Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`.
+Vercel's `trailingSlash: false` redirects slash-ending paths to their slashless form; `cleanUrls: true` serves the HTML files without `.html`. Marketing explicitly rewrites `/` to `/index` because Vercel's prebuilt output exposes `index.html` at `/index` when clean URLs are enabled. This keeps the homepage at `/` and avoids a root 404.
 
 ## Deploy to Vercel
 
@@ -87,7 +87,7 @@ Each app's `vercel.json` supplies its framework, commands, output, and routing s
 
 [`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) deploys both apps whenever a commit is pushed or merged to `main`. It can also be started manually from the Actions tab with `main` selected; other branches are skipped.
 
-The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap.
+The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap. Both workflows check the live marketing homepage, `/about`, `/docs`, and `/docs/getting-started` after deployment.
 
 In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
 

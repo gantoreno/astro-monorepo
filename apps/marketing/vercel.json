@@ -8,6 +8,10 @@
   "trailingSlash": false,
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/index"
+    },
+    {
       "source": "/docs",
       "destination": "https://docs-black-alpha-47.vercel.app/docs"
     },
