@@ -11,7 +11,7 @@ import Layout from "../../../../layouts/Layout.astro";
     <li>Push to <code>main</code>. The workflow deploys docs, fills marketing's <code>vercel.json</code> with that deployment URL, then deploys marketing.</li>
   </ol>
   <h2>Pull-request previews</h2>
-  <p>Open a pull request targeting <code>main</code> from a branch in this repository to deploy a preview of both apps. New commits update the same permanent preview address. Find its URL in the GitHub environment named <code>preview-pr-N</code> or the Actions run summary. The marketing preview proxies to the docs preview from the same run.</p>
+  <p>Open a pull request targeting <code>main</code> from a branch in this repository to deploy a preview of both apps. New commits update the same permanent preview address. Find its URL in the preview comment on the pull request or the Actions run summary. The marketing preview proxies to the docs preview from the same run.</p>
   <h2>How routing works</h2>
   <p>Marketing serves its own Astro pages. Requests to <code>/docs</code> and <code>/docs/*</code> are proxied to the docs project. The marketing domain stays in the address bar.</p>
   <p>Astro-generated docs assets live under <code>/docs/_astro</code>, so they travel through the same proxy.</p>
