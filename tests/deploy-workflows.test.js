@@ -9,15 +9,13 @@ const readWorkflow = (name) => Bun.YAML.parse(readFileSync(new URL(`../.github/w
 for (const kind of ["preview", "production"]) {
   describe(`${kind} parallel deployment`, () => {
     const workflow = readWorkflow(kind);
-    const { docs, marketing, integration } = workflow.jobs;
+    const { docs, marketing } = workflow.jobs;
 
     test("both apps can deploy independently, with the same eligibility guard", () => {
       expect(docs.needs).toBeUndefined();
       expect(marketing.needs).toBeUndefined();
       expect(marketing.if).toBe(docs.if);
-      expect(integration.needs).toEqual(["docs", "marketing"]);
-      // Default needs behavior runs integration only after both deployments succeed.
-      expect(integration.if).toBeUndefined();
+      expect(Object.keys(workflow.jobs)).toEqual(["docs", "marketing"]);
       expect(marketing.env.DOCS_URL).toBeUndefined();
       expect(workflow.env.DOCS_URL).toContain("${{ github.repository_id }}");
       expect(workflow.env.DOCS_URL.includes("pull_request.number")).toBe(kind === "preview");
@@ -49,9 +47,13 @@ for (const kind of ["preview", "production"]) {
       expect(docs.steps.findIndex(step => step.id === "deploy")).toBeLessThan(docs.steps.indexOf(alias));
       if (kind === "preview") {
         expect(docs.steps[docs.steps.indexOf(alias) - 1].name).toBe("Recheck PR before updating docs URL");
-        const checks = integration.steps.findIndex(step => step.name === "Check marketing and proxied docs");
-        expect(checks).toBeLessThan(integration.steps.findIndex(step => step.id === "alias"));
-        expect(integration.steps.findIndex(step => step.id === "alias")).toBeLessThan(integration.steps.findIndex(step => step.name === "Publish preview comment"));
+        const checks = marketing.steps.findIndex(step => step.name === "Check marketing routes");
+        const aliasIndex = marketing.steps.findIndex(step => step.id === "alias");
+        expect(checks).toBeGreaterThan(marketing.steps.findIndex(step => step.id === "deploy"));
+        expect(checks).toBeLessThan(aliasIndex);
+        expect(marketing.steps[aliasIndex].env.MARKETING_URL).toBe("${{ steps.deploy.outputs.url }}");
+        expect(aliasIndex).toBeLessThan(marketing.steps.findIndex(step => step.name === "Publish preview comment"));
+        expect(marketing.permissions["pull-requests"]).toBe("write");
       }
     });
   });

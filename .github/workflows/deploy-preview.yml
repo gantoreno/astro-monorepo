@@ -135,6 +135,9 @@ jobs:
           fi
 
   marketing:
+    permissions:
+      contents: read
+      pull-requests: write
     # Forks and Dependabot do not receive the Vercel repository secrets.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -149,8 +152,6 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
-    outputs:
-      url: ${{ steps.deploy.outputs.url }}
     steps:
       - name: Check PR is still open and current
         uses: actions/github-script@v8
@@ -244,38 +245,10 @@ jobs:
               exit 1
             fi
           done
-
-  integration:
-    needs: [docs, marketing]
-    permissions:
-      contents: read
-      pull-requests: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Install Vercel CLI
-        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
-      - name: Check marketing and proxied docs
-        env:
-          MARKETING_URL: ${{ needs.marketing.outputs.url }}
-        run: |
-          for path in / /about /docs /docs/getting-started; do
-            status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
-            if [[ "$status" != "200" ]]; then
-              echo "::error::Marketing route $path returned HTTP $status instead of 200."
-              exit 1
-            fi
-          done
       - name: Update permanent PR preview URL
         id: alias
         env:
-          MARKETING_URL: ${{ needs.marketing.outputs.url }}
+          MARKETING_URL: ${{ steps.deploy.outputs.url }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -309,7 +282,7 @@ jobs:
             const repositoryUrl = `${GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}`;
             const body = [
               marker,
-              `**Preview ready:** [Open preview](${PREVIEW_URL}) · [Documentation](${PREVIEW_URL}/docs)`,
+              `**Marketing preview ready:** [Open preview](${PREVIEW_URL}) · [Documentation](${PREVIEW_URL}/docs)`,
               "",
               `Commit: [${PR_HEAD_SHA.slice(0, 7)}](${repositoryUrl}/commit/${PR_HEAD_SHA}) · [Workflow run](${repositoryUrl}/actions/runs/${context.runId})`,
             ].join("\n");
