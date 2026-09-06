@@ -90,16 +90,21 @@ jobs:
                 }
               } while (until != null);
             }
-            const host = `marketing-pr-${pullNumber}-${env.REPOSITORY_ID}.vercel.app`;
-            const alias = await vercel(`/v4/aliases/${encodeURIComponent(host)}`, { missingOK: true });
-            if (alias && (alias.projectId !== env.VERCEL_MARKETING_PROJECT_ID || alias.alias !== host || !alias.uid)) {
-              throw new Error("Preview alias does not belong to the expected marketing project.");
+            const aliases = [];
+            for (const [app, projectId] of [["marketing", env.VERCEL_MARKETING_PROJECT_ID], ["docs", env.VERCEL_DOCS_PROJECT_ID]]) {
+              const host = `${app}-pr-${pullNumber}-${env.REPOSITORY_ID}.vercel.app`;
+              const alias = await vercel(`/v4/aliases/${encodeURIComponent(host)}`, { missingOK: true });
+              if (alias && (alias.projectId !== projectId || alias.alias !== host || !alias.uid)) {
+                throw new Error(`Preview alias does not belong to the expected ${app} project.`);
+              }
+              if (alias) aliases.push(alias);
             }
             async function requireClosed() {
               if (!await isClosed()) throw new Error("PR was reopened; stopping cleanup.");
             }
             await requireClosed();
-            if (alias) {
+            for (const alias of aliases) {
+              await requireClosed();
               await vercel(`/v2/aliases/${encodeURIComponent(alias.uid)}`, { method: "DELETE", missingOK: true });
             }
             let deleted = 0;
@@ -130,4 +135,4 @@ jobs:
                 body: `${marker}\n**Preview closed.** The permanent preview URL has been removed. Reopening this PR creates a new preview at the same address.`,
               });
             }
-            await core.summary.addRaw(`Removed the PR #${pullNumber} preview alias and ${deleted} tagged deployments.\n`).write();
+            await core.summary.addRaw(`Removed ${aliases.length} PR #${pullNumber} preview aliases and ${deleted} tagged deployments.\n`).write();

@@ -87,7 +87,9 @@ Each app's `vercel.json` supplies its framework, commands, output, and routing s
 
 [`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) deploys both apps whenever a commit is pushed or merged to `main`. It can also be started manually from the Actions tab with `main` selected; other branches are skipped.
 
-The workflow builds docs in GitHub Actions using `vercel pull` and `vercel build --prod`, then uploads the build with `vercel deploy --prebuilt --prod`. After confirming the docs URL responds with HTTP 200, it fills both docs rewrite destinations in marketing's `vercel.json` with that deployment's exact URL, builds marketing, and deploys it to production. The generated config exists only in the runner; it is not committed. The docs job runs in `apps/docs` and the marketing job runs in `apps/marketing`. Each has its own project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output` in its app directory, plus a fresh checkout of the full repository. Production runs cannot overlap. Both workflows check the live marketing homepage, `/about`, `/docs`, and `/docs/getting-started` after deployment.
+The `docs` and `marketing` jobs build and deploy **in parallel** using `vercel pull`, `vercel build --prod`, and `vercel deploy --prebuilt --prod`. Marketing's generated `vercel.json` points both docs rewrites at the predictable origin `https://docs-production-<repository-id>.vercel.app`; the docs job assigns that alias to its deployment. Neither app waits for the other to build or deploy. The generated config exists only in the runner; it is not committed.
+
+Each job runs in its own app directory with a fresh checkout, project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output`. Docs checks its public alias and marketing checks its own routes independently. A final `integration` job runs after both jobs succeed and checks the marketing homepage, `/about`, `/docs`, and `/docs/getting-started`. Production workflow runs cannot overlap, although the two apps within each run deploy concurrently.
 
 In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
 
@@ -112,9 +114,9 @@ Add `--scope YOUR-TEAM` to the link commands if necessary. Linking the CLI does 
 
 Leave both projects disconnected under Vercel's **Settings → Git**. Both app configs also set `git.deploymentEnabled: false` to prevent automatic Git deployments if a connection is added later; CLI deployments still work.
 
-For docs, disable Vercel Authentication/other Deployment Protection that restricts deployment URLs. The proxy uses the unique deployment URL, which [Standard Protection can restrict even when the production domain is public](https://vercel.com/docs/deployment-protection). Public access to only the stable docs domain is insufficient. The workflow stops before deploying marketing if docs returns a non-200 response.
+For docs, disable Vercel Authentication/other Deployment Protection that restricts access to the docs origin. Both the production docs alias and PR docs aliases must be public so marketing can proxy them. See [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection). The docs job fails if its alias returns a non-200 response; marketing can still build and deploy independently.
 
-Keep docs deployments that are still referenced by active or rollback marketing deployments; deleting one breaks its paired marketing deployment. If marketing fails, its current production deployment remains active, while docs may already have been deployed. Rerun the workflow to retry the pair. Deployment URLs appear in the Actions run summary.
+Production updates are independent: if only one deployment succeeds, that app can already be live, and marketing's `/docs` can temporarily fail or serve a different revision. A failed final verification does not roll back either deployment. Rerun failed jobs to complete the release. Marketing always follows the current docs alias, including when rolling marketing back; roll docs back separately and repoint the docs alias if both apps need to return to an earlier revision. Deployment URLs appear in the Actions run summary.
 
 This uses [Vercel's CLI deployment flow for GitHub Actions](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel). No Vercel GitHub integration, deploy hook, or extra GitHub token is required. The separate preview workflow below handles pull requests.
 
@@ -122,18 +124,20 @@ This uses [Vercel's CLI deployment flow for GitHub Actions](https://vercel.com/k
 
 [`.github/workflows/deploy-preview.yml`](.github/workflows/deploy-preview.yml) creates previews when a PR targeting `main` is opened or reopened, and updates them whenever new commits are pushed. Draft PRs are included. It reuses the same four repository secrets and the same two Vercel projects; no extra Vercel projects or secrets are needed.
 
-Each run checks out the same PR merge commit in both jobs and follows this sequence:
+Each run checks out the same PR merge commit in both jobs:
 
-1. In `apps/docs`, pull Vercel's **Preview** settings (including overrides for the PR branch), build, and deploy without `--prod`.
-2. Confirm the docs preview responds publicly at `/docs`.
-3. In `apps/marketing`, fill both docs rewrites with that exact docs preview URL, then build and deploy using marketing's Preview settings.
-4. After the live checks pass, point `marketing-pr-<number>-<repository-id>.vercel.app` at the new marketing deployment using `vercel alias set`. Create or update a single bot comment on the PR with that stable address and its `/docs` link. The Actions summary also includes these links.
+1. Independently in each app, pull Vercel's **Preview** settings (including overrides for the PR branch), build, and deploy without `--prod`.
+2. Marketing fills both docs rewrites with the known origin `https://docs-pr-<number>-<repository-id>.vercel.app` before building. Docs assigns that alias after deploying. Each job checks its own routes.
+3. The final `integration` job runs after both deployments succeed and checks marketing and its proxied docs together.
+4. After these checks pass, point `marketing-pr-<number>-<repository-id>.vercel.app` at the new marketing deployment using `vercel alias set`. Create or update a single bot comment on the PR with that stable address and its `/docs` link. The Actions summary also includes these links.
 
-The preview address stays the same across successful updates, so bookmarks and shared links follow the latest published version of that PR. The repository ID in the hostname prevents naming collisions between repositories. No extra domain, DNS configuration, or secret is required. Vercel still creates deployment-specific URLs underneath, which remain visible in deployment logs; the workflow uses the exact docs deployment URL internally to keep each marketing build paired with the correct docs build. The shared preview links use only the stable marketing alias and its `/docs` path. Production domains remain unchanged. See [Vercel aliases](https://vercel.com/docs/cli/alias).
+Both aliases stay the same across updates, so their addresses are known before either deployment exists. The repository ID prevents naming collisions between repositories. No extra domain, DNS configuration, or secret is required. Vercel still creates deployment-specific URLs underneath, visible in deployment logs. Marketing follows the latest deployment assigned to that PR's docs alias. Shared preview links continue to use the marketing alias and its `/docs` path. Production domains remain unchanged. See [Vercel aliases](https://vercel.com/docs/cli/alias).
 
-The docs project's Deployment Protection must allow public access to **preview deployment URLs**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. Keep the four credentials as repository secrets so they are available to both jobs. The comment uses the automatic `GITHUB_TOKEN` with `pull-requests: write`; no additional token or secret is needed. The workflow does not create GitHub deployment records or environments. Any records from earlier runs remain in GitHub history.
+The docs project's Deployment Protection must allow public access to **preview docs aliases**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. Keep the four credentials as repository secrets so they are available to both jobs. The comment uses the automatic `GITHUB_TOKEN` with `pull-requests: write`; no additional token or secret is needed. The workflow does not create GitHub deployment records or environments. Any records from earlier runs remain in GitHub history.
 
-Runs for the same PR are serialized so alias updates cannot overlap; different PRs deploy independently. Before moving the alias, the workflow checks that the PR is still open and the deployment matches its current head commit. Outdated reruns and runs for closed PRs fail that check without moving the alias. Closing or merging a PR runs the separate cleanup workflow described below. A failed build or live check leaves the previous alias target and preview comment unchanged.
+Runs for the same PR are serialized so alias updates cannot overlap; different PRs deploy independently. Before moving either alias, the workflow checks that the PR is still open and the deployment matches its current head commit. Outdated reruns and runs for closed PRs fail that check without moving the alias. Closing or merging a PR runs the separate cleanup workflow described below. A failed build or live check leaves the previous marketing alias target and preview comment unchanged. Docs can update independently, so an existing preview may serve newer docs even when marketing fails. The first marketing deployment can finish before docs is available; combined route checks wait for both jobs.
+
+To block merges until the preview is healthy, configure a `main` branch ruleset or branch protection rule to require the preview workflow's `docs`, `marketing`, and `integration` checks. The required deployment checks block merging if either app fails. `integration` checks cross-app routing once both deployments succeed and is skipped if either deployment fails; it does not duplicate their status checks. Workflow YAML does not enable required checks by itself. Fork and Dependabot previews remain skipped, so use an appropriate separate CI policy for those contributions. See [GitHub required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging).
 
 Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel repository secrets. The deployment workflow uses `pull_request` to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
 
@@ -141,7 +145,7 @@ Only PRs with branches in this repository deploy automatically. Fork PRs and Dep
 
 [`.github/workflows/cleanup-preview.yml`](.github/workflows/cleanup-preview.yml) runs only on `pull_request_target: closed`, which includes merging a PR. It runs trusted inline code from `main`, with no checkout or execution of PR code. It does not add cleanup jobs to the preview workflow that runs when a PR is opened or updated. The cleanup workflow must reach `main` before it can handle closures. See [GitHub's event behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target).
 
-Both preview deploy commands tag Vercel deployments with `ciRepositoryId` and `ciPullRequest`. Cleanup removes the PR's permanent marketing alias, then deletes matching preview deployments from both configured projects, including previous runs. It checks both metadata fields and the project ID, excludes production/promoted deployments, and updates the existing bot comment to **Preview closed**. It uses the same four repository secrets; no GitHub environment or deployment record is created.
+Both preview deploy commands tag Vercel deployments with `ciRepositoryId` and `ciPullRequest`. Cleanup validates ownership and removes both of the PR's permanent aliases (marketing and docs), then deletes matching preview deployments from both configured projects, including previous runs. It checks both metadata fields and the project ID, excludes production/promoted deployments, and updates the existing bot comment to **Preview closed**. It uses the same four repository secrets; no GitHub environment or deployment record is created.
 
 Cleanup and deployment share the same per-PR concurrency group. Cleanup rechecks that the PR is closed before deleting, while preview runs reject closed or outdated PRs before deploying. Reopening the PR creates a new pair at the same permanent URL. Rerunning cleanup tolerates an alias or deployment that has already been removed; other API errors fail the run so it can be retried. Deployments created before the tags were added remain untouched, as do historical GitHub deployment records.
 
@@ -179,7 +183,7 @@ Use a docs production URL accessible without a Vercel login. Protected previews 
 
 ## Verify the deployed sites
 
-Redeploy **docs first**, then marketing: older docs deployments still have the previous directory output and slash-ending paths.
+After both deployment jobs complete, use the final `integration` result to confirm the combined site is ready.
 
 On marketing's domain, test `/`, `/about`, `/pricing`, `/docs`, `/docs/getting-started`, and `/docs/guides/deployment`. Open a nested docs URL directly and refresh it. Check that its generated `/docs/_astro/*.css` stylesheet loads through marketing. A missing docs page should return a docs 404.
 
@@ -193,4 +197,4 @@ curl -i https://YOUR-MARKETING-DOMAIN/docs/not-a-real-page
 
 Expect 200 for existing canonical pages and 404 for the missing page. No response should redirect to the docs hostname.
 
-Both GitHub Actions workflows pair docs and marketing from the same run. Manual deployments use the hostname in marketing's `vercel.json`, so update it yourself when deploying manually.
+Both GitHub Actions workflows build docs and marketing from the same commit and connect them through a predictable docs alias. Each app can update independently. Manual deployments use the hostname in marketing's `vercel.json`, so update it yourself when deploying manually.
