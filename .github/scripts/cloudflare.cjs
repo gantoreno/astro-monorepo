@@ -94,6 +94,7 @@ function prepare({ appName, docsOrigin, preview, root = process.cwd() }) {
   if (appName === "marketing") {
     if (
       config.main !== "./cloudflare-worker.js" ||
+      !config.compatibility_flags?.includes("global_fetch_strictly_public") ||
       config.assets.binding !== "ASSETS" ||
       !config.assets.run_worker_first?.includes("/docs/*")
     ) {

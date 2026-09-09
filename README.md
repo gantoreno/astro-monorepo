@@ -192,7 +192,7 @@ The Vercel and Cloudflare workflows coexist. Cloudflare uses two long-lived Work
 | Docs | `astro-monorepo-docs` | `https://astro-monorepo-docs.<account-subdomain>.workers.dev` |
 | Marketing | `astro-monorepo-marketing` | `https://astro-monorepo-marketing.<account-subdomain>.workers.dev` |
 
-Both Workers upload each app's `dist` directory with Workers Static Assets. Marketing also runs the small Worker entry point in `apps/marketing/cloudflare-worker.js`: marketing routes use its `ASSETS` binding, while `/docs` and `/docs/*` are fetched from the docs Worker. The workflow writes the appropriate production or PR docs origin into that marketing version before upload. Redirect responses from docs are rewritten to keep visitors on the marketing hostname.
+Both Workers upload each app's `dist` directory with Workers Static Assets. Marketing also runs the small Worker entry point in `apps/marketing/cloudflare-worker.js`: marketing routes use its `ASSETS` binding, while `/docs` and `/docs/*` are fetched from the docs Worker. The workflow writes the appropriate production or PR docs origin into that marketing version before upload. The marketing configuration enables Cloudflare's `global_fetch_strictly_public` compatibility flag so this public same-zone Worker-to-Worker request is allowed; redirect responses from docs are rewritten to keep visitors on the marketing hostname.
 
 Both Wrangler configurations use `html_handling: "drop-trailing-slash"` and `not_found_handling: "404-page"`, preserving the same slashless routes and custom 404 behavior as the Vercel deployment.
 

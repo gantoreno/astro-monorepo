@@ -35,6 +35,7 @@ describe("Cloudflare static asset configuration", () => {
       expect(config.assets.html_handling).toBe("drop-trailing-slash");
       expect(config.assets.not_found_handling).toBe("404-page");
     }
+    expect(marketing.compatibility_flags).toContain("global_fetch_strictly_public");
     expect(marketing.assets.binding).toBe("ASSETS");
     expect(marketing.assets.run_worker_first).toEqual(["/docs", "/docs/*"]);
   });
