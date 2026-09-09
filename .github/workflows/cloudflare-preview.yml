@@ -1,0 +1,274 @@
+name: Deploy PR preview to Cloudflare
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Shared with cloudflare-cleanup.yml so uploads and cleanup cannot overlap.
+concurrency:
+  group: cloudflare-preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  ASTRO_TELEMETRY_DISABLED: "1"
+  CLOUDFLARE_WRANGLER_VERSION: "4.127.1"
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  REPOSITORY_ID: ${{ github.repository_id }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  docs:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check PR is still open and current
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
+      - uses: actions/checkout@v4
+        with:
+          # Both jobs build the same PR merge commit.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install workspace packages
+        run: bun install --frozen-lockfile
+      - name: Test Cloudflare deployment lifecycle
+        run: bun test tests/cloudflare.test.js
+      - name: Check deployment secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          : "${CLOUDFLARE_API_TOKEN:?Set the CLOUDFLARE_API_TOKEN repository secret}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Set the CLOUDFLARE_ACCOUNT_ID repository secret}"
+      - name: Build docs
+        run: bun run build:docs
+      - name: Recheck PR before uploading docs
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
+      - name: Prepare docs preview version
+        id: target
+        uses: actions/github-script@v8
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        with:
+          script: |
+            const lifecycle = require("./.github/scripts/cloudflare.cjs");
+            const target = await lifecycle.deploymentTarget({
+              appName: "docs",
+              production: false,
+              repositoryId: process.env.REPOSITORY_ID,
+              prNumber: process.env.PR_NUMBER,
+              accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+              apiToken: process.env.CLOUDFLARE_API_TOKEN,
+            });
+            lifecycle.prepare({ appName: "docs", preview: true });
+            core.setOutput("command", target.command);
+            core.setOutput("url", target.url);
+      - name: Upload docs preview version
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.CLOUDFLARE_WRANGLER_VERSION }}
+          packageManager: bun
+          command: ${{ steps.target.outputs.command }}
+      - name: Check docs preview
+        env:
+          DOCS_URL: ${{ steps.target.outputs.url }}
+        run: |
+          status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")" || true
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Docs preview returned HTTP $status instead of 200."
+            exit 1
+          fi
+          printf 'Docs preview: %s/docs\n' "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  marketing:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check PR is still open and current
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
+      - uses: actions/checkout@v4
+        with:
+          # Both jobs build the same PR merge commit.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install workspace packages
+        run: bun install --frozen-lockfile
+      - name: Check deployment secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          : "${CLOUDFLARE_API_TOKEN:?Set the CLOUDFLARE_API_TOKEN repository secret}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Set the CLOUDFLARE_ACCOUNT_ID repository secret}"
+      - name: Build marketing
+        run: bun run build:marketing
+      - name: Recheck PR before uploading marketing
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; skipping deployment.");
+            }
+      - name: Prepare marketing preview version
+        id: target
+        uses: actions/github-script@v8
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        with:
+          script: |
+            const lifecycle = require("./.github/scripts/cloudflare.cjs");
+            const target = await lifecycle.deploymentTarget({
+              appName: "marketing",
+              production: false,
+              repositoryId: process.env.REPOSITORY_ID,
+              prNumber: process.env.PR_NUMBER,
+              accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+              apiToken: process.env.CLOUDFLARE_API_TOKEN,
+            });
+            lifecycle.prepare({
+              appName: "marketing",
+              docsOrigin: target.docsOrigin,
+              preview: true,
+            });
+            core.setOutput("command", target.command);
+            core.setOutput("url", target.url);
+      - name: Upload marketing preview version
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.CLOUDFLARE_WRANGLER_VERSION }}
+          packageManager: bun
+          command: ${{ steps.target.outputs.command }}
+      - name: Check marketing routes
+        env:
+          MARKETING_URL: ${{ steps.target.outputs.url }}
+        run: |
+          for path in / /about; do
+            status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
+            if [[ "$status" != "200" ]]; then
+              echo "::error::Marketing route $path returned HTTP $status instead of 200."
+              exit 1
+            fi
+          done
+      - name: Recheck PR before publishing preview link
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            if (pr.state !== "open" || pr.head.sha !== process.env.PR_HEAD_SHA) {
+              throw new Error("This preview is outdated or the PR is closed; leaving its comment unchanged.");
+            }
+      - name: Publish preview comment
+        uses: actions/github-script@v8
+        env:
+          PREVIEW_URL: ${{ steps.target.outputs.url }}
+        with:
+          script: |
+            const marker = "<!-- cloudflare-pr-preview -->";
+            const { PREVIEW_URL, PR_HEAD_SHA, GITHUB_SERVER_URL } = process.env;
+            const repositoryUrl = `${GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}`;
+            const body = [
+              marker,
+              `**Cloudflare preview ready:** [Open preview](${PREVIEW_URL}) · [Documentation](${PREVIEW_URL}/docs)`,
+              "",
+              `Commit: [${PR_HEAD_SHA.slice(0, 7)}](${repositoryUrl}/commit/${PR_HEAD_SHA}) · [Workflow run](${repositoryUrl}/actions/runs/${context.runId})`,
+            ].join("\n");
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === "github-actions[bot]" &&
+              comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+            await core.summary
+              .addRaw(`Preview: ${PREVIEW_URL}\nDocumentation: ${PREVIEW_URL}/docs\n`)
+              .write();
