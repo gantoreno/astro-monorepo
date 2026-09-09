@@ -1,17 +1,20 @@
 # Astro + Bun: marketing and docs
 
-Two independently deployable Astro 7 applications in a Bun workspace. Both prerender their pages at build time using Astro's static output; no SSR adapter is needed for Vercel. Pages are authored as `.astro` components with a shared layout and stylesheet within each app.
+Two independently deployable Astro 7 applications in a Bun workspace. Both prerender their pages at build time using Astro's static output; no SSR adapter is needed for Vercel or Cloudflare Workers Static Assets. Pages are authored as `.astro` components with a shared layout and stylesheet within each app.
 
 ```text
 apps/
   marketing/
     astro.config.mjs
+    cloudflare-worker.js  # Serves marketing assets and proxies /docs on Cloudflare
+    wrangler.json
     vercel.json
     src/pages/           # /, /about, /pricing, custom 404
     src/layouts/
     src/styles/
   docs/
     astro.config.mjs
+    wrangler.json
     vercel.json
     src/pages/docs/      # /docs, /docs/getting-started, /docs/guides/deployment
     src/pages/404.astro
@@ -179,6 +182,55 @@ vercel deploy --prebuilt --prod
 Add `--scope YOUR-TEAM` to linking commands if needed. Each app keeps its own project link, so switching directories selects the corresponding project. Keep the entire monorepo on disk for Bun's workspace dependencies. These commands build locally before upload; a plain `vercel --prod` source upload from one app directory would omit the parent workspace files.
 
 Use a docs production URL accessible without a Vercel login. Protected previews can return an authentication page. Standard Vercel rewrites also give existing files precedence, so keep the `/docs` namespace out of marketing's pages and public directory.
+
+## Deploy to Cloudflare Workers
+
+The Vercel and Cloudflare workflows coexist. Cloudflare uses two long-lived Workers configured in the app directories:
+
+| App | Worker | Production URL |
+| --- | --- | --- |
+| Docs | `astro-monorepo-docs` | `https://astro-monorepo-docs.<account-subdomain>.workers.dev` |
+| Marketing | `astro-monorepo-marketing` | `https://astro-monorepo-marketing.<account-subdomain>.workers.dev` |
+
+Both Workers upload each app's `dist` directory with Workers Static Assets. Marketing also runs the small Worker entry point in `apps/marketing/cloudflare-worker.js`: marketing routes use its `ASSETS` binding, while `/docs` and `/docs/*` are fetched from the docs Worker. The workflow writes the appropriate production or PR docs origin into that marketing version before upload. The marketing configuration enables Cloudflare's `global_fetch_strictly_public` compatibility flag so this public same-zone Worker-to-Worker request is allowed; redirect responses from docs are rewritten to keep visitors on the marketing hostname.
+
+Both Wrangler configurations use `html_handling: "drop-trailing-slash"` and `not_found_handling: "404-page"`, preserving the same slashless routes and custom 404 behavior as the Vercel deployment.
+
+### Required GitHub secrets
+
+Add these under **Settings → Secrets and variables → Actions**:
+
+| Repository secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token scoped to the target account with Workers Scripts write access. The **Edit Cloudflare Workers** token template is a suitable starting point. |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID that owns both Workers. |
+
+No Worker hostname, project ID, GitHub token, or per-app credential is required. The workflows read the account's `workers.dev` subdomain through the Cloudflare API, and the automatic `GITHUB_TOKEN` manages the preview comment. The account must have a `workers.dev` subdomain enabled. The committed Worker names can be changed in the Wrangler configs and `.github/scripts/cloudflare.cjs` before the first deployment.
+
+Do not connect these Workers to Cloudflare Workers Builds or the Cloudflare GitHub App unless the GitHub Actions workflows are disabled; otherwise both systems can publish the same Worker.
+
+### Production lifecycle
+
+`.github/workflows/cloudflare-production.yml` runs for pushes to `main` and can also be started manually with `main` selected. Docs and marketing build and deploy in parallel with `wrangler deploy`. Production can later be attached to a Cloudflare custom domain; these workflows intentionally use the predictable `workers.dev` addresses as the internal docs origin.
+
+### Pull-request previews
+
+`.github/workflows/cloudflare-preview.yml` uploads, but does not deploy, one PR version to each long-lived Worker for same-repository PRs. Both jobs build the same PR merge commit and run in parallel. If either Worker has never been deployed, preview preparation creates its empty Worker container when needed and makes one inert bootstrap deployment that always returns 404. This one-time deployment activates Cloudflare's `workers.dev` preview routing without publishing PR content at the production URL. Wrangler then assigns the same `pr-<number>` alias to both uploaded versions:
+
+```text
+https://pr-123-astro-monorepo-marketing.<account-subdomain>.workers.dev
+https://pr-123-astro-monorepo-docs.<account-subdomain>.workers.dev
+```
+
+The marketing version is built with the corresponding docs URL, so the shared preview exposes documentation at the marketing preview's `/docs` path. Each new commit moves both aliases to the latest versions. The marketing job creates or updates one PR comment containing the stable marketing and documentation links. Preview assets receive `X-Robots-Tag: noindex`. Fork and Dependabot previews are skipped because they do not receive deployment secrets.
+
+The two builds and uploads remain independent. Before publishing the preview link, the marketing job checks both its own pages and the proxied `/docs` routes, retrying while the docs alias propagates. Either alias can temporarily point to a different revision if only one upload succeeds; rerun the failed job to complete the pair.
+
+### Preview cleanup
+
+`.github/workflows/cloudflare-cleanup.yml` runs from trusted `main` code when a PR closes or merges. Preview uploads carry the tag `ci-preview-<repository-id>-pr-<number>`. Cleanup lists both Workers' versions, selects only that tag, refuses to delete any version referenced by production deployment history, deletes the matching versions through Cloudflare's version API, and changes the existing PR comment to **Cloudflare preview removed**. Reopening the PR publishes new versions at the same aliases.
+
+Preview deployment and cleanup share a per-PR concurrency group, and both recheck PR state to avoid a delayed upload racing with closure or a cleanup racing with reopening. The cleanup endpoint is currently part of Cloudflare's beta Workers version API, so validate its behavior against the target account before relying on it as the only retention mechanism.
 
 ## Verify the deployed sites
 
