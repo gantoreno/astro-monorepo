@@ -101,7 +101,9 @@ describe("marketing Worker", () => {
   test("proxies docs paths and keeps redirects on the marketing origin", async () => {
     let upstreamRequest;
     const response = await handleRequest(
-      new Request("https://marketing.example/docs/getting-started/?source=preview"),
+      new Request("https://marketing.example/docs/getting-started/?source=preview", {
+        headers: { "cf-workers-preview-token": "marketing-preview" },
+      }),
       {
         DOCS_ORIGIN: "https://pr-7-docs.example.workers.dev",
         ASSETS: { fetch: async () => new Response("unexpected") },
@@ -118,6 +120,7 @@ describe("marketing Worker", () => {
     expect(upstreamRequest.url).toBe(
       "https://pr-7-docs.example.workers.dev/docs/getting-started/?source=preview",
     );
+    expect(upstreamRequest.headers.has("cf-workers-preview-token")).toBe(false);
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
       "https://marketing.example/docs/getting-started",

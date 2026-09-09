@@ -224,7 +224,7 @@ https://pr-123-astro-monorepo-docs.<account-subdomain>.workers.dev
 
 The marketing version is built with the corresponding docs URL, so the shared preview exposes documentation at the marketing preview's `/docs` path. Each new commit moves both aliases to the latest versions. The marketing job creates or updates one PR comment containing the stable marketing and documentation links. Preview assets receive `X-Robots-Tag: noindex`. Fork and Dependabot previews are skipped because they do not receive deployment secrets.
 
-The two jobs remain independent. A preview link can therefore be published while docs is still uploading, and either alias can temporarily point to a different revision if only one job succeeds. Rerun the failed job to complete the pair.
+The two builds and uploads remain independent. Before publishing the preview link, the marketing job checks both its own pages and the proxied `/docs` routes, retrying while the docs alias propagates. Either alias can temporarily point to a different revision if only one upload succeeds; rerun the failed job to complete the pair.
 
 ### Preview cleanup
 

@@ -37,7 +37,9 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
     if (origin.origin === url.origin) throw new Error("DOCS_ORIGIN must not point back to marketing");
 
     const upstream = new URL(`${url.pathname}${url.search}`, origin);
-    const response = await fetchImpl(new Request(upstream, request));
+    const upstreamRequest = new Request(upstream, request);
+    upstreamRequest.headers.delete("cf-workers-preview-token");
+    const response = await fetchImpl(upstreamRequest);
     return rewriteLocation(response, url.origin, origin);
   }
 

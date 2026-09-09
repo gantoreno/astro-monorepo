@@ -234,7 +234,7 @@ jobs:
         env:
           MARKETING_URL: ${{ steps.target.outputs.url }}
         run: |
-          for path in / /about; do
+          for path in / /about /docs /docs/getting-started; do
             status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
             if [[ "$status" != "200" ]]; then
               echo "::error::Marketing route $path returned HTTP $status instead of 200."
