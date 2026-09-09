@@ -3,10 +3,12 @@ const path = require("node:path");
 
 const APPS = Object.freeze({
   docs: {
+    bootstrapConfigPath: ".github/cloudflare/bootstrap-docs.json",
     configPath: "apps/docs/wrangler.json",
     worker: "astro-monorepo-docs",
   },
   marketing: {
+    bootstrapConfigPath: ".github/cloudflare/bootstrap-marketing.json",
     configPath: "apps/marketing/wrangler.json",
     worker: "astro-monorepo-marketing",
   },
@@ -52,6 +54,11 @@ function uploadCommand({ appName, production, repositoryId, prNumber }) {
     return `deploy --config ${configPath} --tag ci-production-${positiveInteger(repositoryId, "repository ID")}`;
   }
   return `versions upload --config ${configPath} --preview-alias ${previewAlias(prNumber)} --tag ${versionTag(repositoryId, prNumber)}`;
+}
+
+function bootstrapCommand(appName) {
+  const { bootstrapConfigPath } = app(appName);
+  return `deploy --config ${bootstrapConfigPath} --tag ci-bootstrap`;
 }
 
 function normalizeOrigin(value) {
@@ -159,7 +166,7 @@ async function ensurePreviewReady({ appName, ...options }) {
       method: "POST",
       body: { enabled: true, previews_enabled: true },
     });
-    return;
+    return true;
   }
 
   const settings = await api(`scripts/${selected.worker}/subdomain`, { missingOK: true });
@@ -169,13 +176,19 @@ async function ensurePreviewReady({ appName, ...options }) {
       body: { enabled: true, previews_enabled: true },
     });
   }
+
+  if (!Array.isArray(deployments.result?.deployments)) {
+    throw new Error("Unexpected Cloudflare deployments response");
+  }
+  return deployments.result.deployments.length === 0;
 }
 
 async function deploymentTarget({ appName, production, repositoryId, prNumber, ...options }) {
   const account = await accountSubdomain(options);
-  if (!production) await ensurePreviewReady({ appName, ...options });
+  const needsBootstrap = production ? false : await ensurePreviewReady({ appName, ...options });
   const selectedPr = production ? undefined : positiveInteger(prNumber, "PR number");
   return {
+    bootstrapCommand: needsBootstrap ? bootstrapCommand(appName) : "",
     command: uploadCommand({ appName, production, repositoryId, prNumber: selectedPr }),
     url: workerUrl({ appName, accountSubdomain: account, prNumber: selectedPr }),
     docsOrigin: workerUrl({ appName: "docs", accountSubdomain: account, prNumber: selectedPr }),
@@ -230,6 +243,7 @@ async function deletePreviewVersions({ repositoryId, prNumber, requireClosed = a
 module.exports = {
   APPS,
   accountSubdomain,
+  bootstrapCommand,
   deletePreviewVersions,
   deploymentTarget,
   prepare,

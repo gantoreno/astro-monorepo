@@ -99,8 +99,18 @@ jobs:
               apiToken: process.env.CLOUDFLARE_API_TOKEN,
             });
             lifecycle.prepare({ appName: "docs", preview: true });
+            core.setOutput("bootstrap-command", target.bootstrapCommand);
             core.setOutput("command", target.command);
             core.setOutput("url", target.url);
+      - name: Bootstrap docs Worker
+        if: steps.target.outputs.bootstrap-command != ''
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.CLOUDFLARE_WRANGLER_VERSION }}
+          packageManager: bun
+          command: ${{ steps.target.outputs.bootstrap-command }}
       - name: Upload docs preview version
         id: deploy
         uses: cloudflare/wrangler-action@v4
@@ -199,8 +209,18 @@ jobs:
               docsOrigin: target.docsOrigin,
               preview: true,
             });
+            core.setOutput("bootstrap-command", target.bootstrapCommand);
             core.setOutput("command", target.command);
             core.setOutput("url", target.url);
+      - name: Bootstrap marketing Worker
+        if: steps.target.outputs.bootstrap-command != ''
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.CLOUDFLARE_WRANGLER_VERSION }}
+          packageManager: bun
+          command: ${{ steps.target.outputs.bootstrap-command }}
       - name: Upload marketing preview version
         id: deploy
         uses: cloudflare/wrangler-action@v4

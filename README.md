@@ -215,7 +215,7 @@ Do not connect these Workers to Cloudflare Workers Builds or the Cloudflare GitH
 
 ### Pull-request previews
 
-`.github/workflows/cloudflare-preview.yml` uploads, but does not deploy, one version to each long-lived Worker for same-repository PRs. Both jobs build the same PR merge commit and run in parallel. If either Worker does not exist yet, preview preparation creates its empty Worker container through Cloudflare's beta Workers API and enables its `workers.dev` preview URLs; it does not create a production deployment. Wrangler then assigns the same `pr-<number>` alias to both uploaded versions:
+`.github/workflows/cloudflare-preview.yml` uploads, but does not deploy, one PR version to each long-lived Worker for same-repository PRs. Both jobs build the same PR merge commit and run in parallel. If either Worker has never been deployed, preview preparation creates its empty Worker container when needed and makes one inert bootstrap deployment that always returns 404. This one-time deployment activates Cloudflare's `workers.dev` preview routing without publishing PR content at the production URL. Wrangler then assigns the same `pr-<number>` alias to both uploaded versions:
 
 ```text
 https://pr-123-astro-monorepo-marketing.<account-subdomain>.workers.dev

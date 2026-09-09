@@ -145,9 +145,12 @@ describe("Cloudflare deployment lifecycle", () => {
     ).toBe(
       "versions upload --config apps/docs/wrangler.json --preview-alias pr-7 --tag ci-preview-1234-pr-7",
     );
+    expect(lifecycle.bootstrapCommand("docs")).toBe(
+      "deploy --config .github/cloudflare/bootstrap-docs.json --tag ci-bootstrap",
+    );
   });
 
-  test("creates an empty Worker before the first preview upload", async () => {
+  test("creates and bootstraps a Worker before the first preview upload", async () => {
     const requests = [];
     const fetchImpl = async (url, options) => {
       const parsed = new URL(url);
@@ -181,6 +184,9 @@ describe("Cloudflare deployment lifecycle", () => {
     expect(target.url).toBe(
       "https://pr-7-astro-monorepo-docs.example-account.workers.dev",
     );
+    expect(target.bootstrapCommand).toBe(
+      "deploy --config .github/cloudflare/bootstrap-docs.json --tag ci-bootstrap",
+    );
     expect(requests).toEqual([
       {
         method: "GET",
@@ -203,6 +209,39 @@ describe("Cloudflare deployment lifecycle", () => {
         body: { enabled: true, previews_enabled: true },
       },
     ]);
+  });
+
+  test("bootstraps an existing Worker that has never been deployed", async () => {
+    const fetchImpl = async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/workers/subdomain")) {
+        return Response.json({ success: true, result: { subdomain: "example-account" } });
+      }
+      if (parsed.pathname.endsWith("/deployments")) {
+        return Response.json({ success: true, result: { deployments: [] } });
+      }
+      if (parsed.pathname.endsWith("/subdomain")) {
+        return Response.json({
+          success: true,
+          result: { enabled: true, previews_enabled: true },
+        });
+      }
+      throw new Error(`Unexpected Cloudflare request: ${url}`);
+    };
+
+    const target = await lifecycle.deploymentTarget({
+      appName: "marketing",
+      production: false,
+      repositoryId: 1234,
+      prNumber: 7,
+      accountId: "account",
+      apiToken: "token",
+      fetchImpl,
+    });
+
+    expect(target.bootstrapCommand).toBe(
+      "deploy --config .github/cloudflare/bootstrap-marketing.json --tag ci-bootstrap",
+    );
   });
 
   test("production and preview jobs remain independent", () => {
