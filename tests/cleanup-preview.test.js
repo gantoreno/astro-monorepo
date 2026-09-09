@@ -57,7 +57,12 @@ function harness(options = {}) {
       return Response.json({ deployments: projectPages[index], pagination: { next: index === 0 && projectPages.length > 1 ? 100 : null } });
     }
     if (url.pathname.startsWith("/v4/aliases/")) {
-      return Response.json(options.alias ?? { uid: "alias-7", alias: host, projectId: "prj-marketing" });
+      const isDocs = url.pathname.includes("docs-pr-");
+      return Response.json((isDocs ? options.docsAlias : options.alias) ?? {
+        uid: isDocs ? "alias-docs-7" : "alias-7",
+        alias: isDocs ? "docs-pr-7-1234.vercel.app" : host,
+        projectId: isDocs ? "prj-docs" : "prj-marketing",
+      });
     }
     if (url.pathname.startsWith("/v13/deployments/")) {
       const id = url.pathname.split("/").at(-1);
@@ -90,22 +95,24 @@ describe("preview cleanup", () => {
 
   test("preview preflight rejects closed PRs and outdated reruns before deploying", async () => {
     const preview = readWorkflow("deploy-preview");
-    const preflight = new AsyncFunction("github", "context", "process", preview.jobs.docs.steps[0].with.script);
-    for (const [state, sha, allowed] of [["open", "current", true], ["closed", "current", false], ["open", "outdated", false]]) {
-      const run = preflight(
-        { rest: { pulls: { get: async () => ({ data: { state, head: { sha } } }) } } },
-        { repo: { owner: "test", repo: "repo" }, issue: { number: 7 } },
-        { env: { PR_HEAD_SHA: "current" } },
-      );
-      if (allowed) await run;
-      else await expect(run).rejects.toThrow("skipping deployment");
+    for (const job of ["docs", "marketing"]) {
+      const preflight = new AsyncFunction("github", "context", "process", preview.jobs[job].steps[0].with.script);
+      for (const [state, sha, allowed] of [["open", "current", true], ["closed", "current", false], ["open", "outdated", false]]) {
+        const run = preflight(
+          { rest: { pulls: { get: async () => ({ data: { state, head: { sha } } }) } } },
+          { repo: { owner: "test", repo: "repo" }, issue: { number: 7 } },
+          { env: { PR_HEAD_SHA: "current" } },
+        );
+        if (allowed) await run;
+        else await expect(run).rejects.toThrow("skipping deployment");
+      }
     }
   });
 
   test("removes alias and matching deployments from both projects, updates existing comment", async () => {
     const h = harness();
     await h.run();
-    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v13/deployments/dpl-marketing", "/v13/deployments/dpl-docs"]);
+    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v2/aliases/alias-docs-7", "/v13/deployments/dpl-marketing", "/v13/deployments/dpl-docs"]);
     expect(h.updates).toHaveLength(1);
     expect(h.updates[0].comment_id).toBe(42);
     expect(h.updates[0].body).toContain("**Preview closed.**");
@@ -126,7 +133,7 @@ describe("preview cleanup", () => {
       "prj-docs": [[docs]],
     } });
     await h.run();
-    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v13/deployments/dpl-marketing", "/v13/deployments/dpl-older", "/v13/deployments/dpl-docs"]);
+    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v2/aliases/alias-docs-7", "/v13/deployments/dpl-marketing", "/v13/deployments/dpl-older", "/v13/deployments/dpl-docs"]);
     const lists = h.requests.filter((r) => r.path === "/v7/deployments");
     expect(lists).toHaveLength(3);
     expect(lists[1].query.get("until")).toBe("100");
@@ -173,10 +180,22 @@ describe("preview cleanup", () => {
     expect(h.deletes()).toEqual([]);
   });
 
+  test("validates docs alias ownership before deleting either alias", async () => {
+    const h = harness({ docsAlias: { uid: "alias-docs-7", alias: "docs-pr-7-1234.vercel.app", projectId: "prj-other" } });
+    await expect(h.run()).rejects.toThrow("expected docs project");
+    expect(h.deletes()).toEqual([]);
+  });
+
+  test("cleans older previews that have no docs alias", async () => {
+    const h = harness({ status: (url) => url.pathname.includes("/v4/aliases/docs-pr-") ? 404 : undefined });
+    await h.run();
+    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v13/deployments/dpl-marketing", "/v13/deployments/dpl-docs"]);
+  });
+
   test("rechecks each deployment before deleting to protect promotions", async () => {
     const h = harness({ detail: (deployment) => ({ ...deployment, target: "production" }) });
     await expect(h.run()).rejects.toThrow("no longer matches");
-    expect(h.deletes()).toEqual(["/v2/aliases/alias-7"]);
+    expect(h.deletes()).toEqual(["/v2/aliases/alias-7", "/v2/aliases/alias-docs-7"]);
     expect(h.updates).toEqual([]);
   });
 

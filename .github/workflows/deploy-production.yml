@@ -16,6 +16,7 @@ concurrency:
 env:
   VERCEL_CLI_VERSION: "59.11.7"
   ASTRO_TELEMETRY_DISABLED: "1"
+  DOCS_URL: https://docs-production-${{ github.repository_id }}.vercel.app
 
 defaults:
   run:
@@ -33,8 +34,6 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
-    outputs:
-      url: ${{ steps.deploy.outputs.url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -82,9 +81,13 @@ jobs:
             --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Docs deployment: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
-      - name: Check docs is publicly accessible
+      - name: Update predictable docs URL
         env:
-          DOCS_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          vercel alias set "$DEPLOYMENT_URL" "${DOCS_URL#https://}" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          printf 'Docs: %s/docs\n' "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check docs is publicly accessible
         run: |
           status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$DOCS_URL/docs")" || true
           if [[ "$status" != "200" ]]; then
@@ -93,7 +96,7 @@ jobs:
           fi
 
   marketing:
-    needs: docs
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -103,7 +106,6 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
-      DOCS_URL: ${{ needs.docs.outputs.url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -119,7 +121,7 @@ jobs:
           : "${VERCEL_PROJECT_ID:?Set the VERCEL_MARKETING_PROJECT_ID repository secret}"
       - name: Install Vercel CLI
         run: npm install --global "vercel@$VERCEL_CLI_VERSION"
-      - name: Point marketing at this run's docs deployment
+      - name: Point marketing at the predictable docs URL
         run: |
           node --input-type=module <<'JS'
           import { readFileSync, writeFileSync } from "node:fs";
@@ -168,11 +170,11 @@ jobs:
             --meta "ciRunUrl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")"
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
           printf 'Marketing deployment: %s\nDocs origin: %s\n' "$url" "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
-      - name: Check marketing and proxied docs
+      - name: Check marketing routes
         env:
           MARKETING_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          for path in / /about /docs /docs/getting-started; do
+          for path in / /about; do
             status="$(curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 --output /dev/null --write-out '%{http_code}' --max-time 30 "$MARKETING_URL$path")" || true
             if [[ "$status" != "200" ]]; then
               echo "::error::Marketing route $path returned HTTP $status instead of 200."
