@@ -119,20 +119,25 @@ function cloudflareApi({ accountId, apiToken, fetchImpl = fetch }) {
   if (!accountId || !apiToken) {
     throw new Error("Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN repository secrets");
   }
-  return async (endpoint, method = "GET") => {
+  return async (endpoint, { method = "GET", body, missingOK = false } = {}) => {
     const response = await fetchImpl(
       `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/workers/${endpoint}`,
       {
         method,
-        headers: { Authorization: `Bearer ${apiToken}` },
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(30_000),
       },
     );
-    const body = await response.json();
-    if (!response.ok || body.success !== true) {
-      throw new Error(`Cloudflare ${method} failed (${response.status}): ${JSON.stringify(body.errors)}`);
+    const responseBody = await response.json();
+    if (missingOK && response.status === 404) return null;
+    if (!response.ok || responseBody.success !== true) {
+      throw new Error(`Cloudflare ${method} failed (${response.status}): ${JSON.stringify(responseBody.errors)}`);
     }
-    return body;
+    return responseBody;
   };
 }
 
@@ -141,22 +146,34 @@ async function accountSubdomain(options) {
   return dnsLabel(result?.subdomain, "workers.dev account subdomain");
 }
 
-async function requirePreviewReady({ appName, ...options }) {
+async function ensurePreviewReady({ appName, ...options }) {
   const selected = app(appName);
   const api = cloudflareApi(options);
-  const { result } = await api(`scripts/${selected.worker}/deployments`);
-  if (!result?.deployments?.length) {
-    throw new Error(`Deploy ${appName} from main before uploading preview versions`);
+  const deployments = await api(`scripts/${selected.worker}/deployments`, { missingOK: true });
+  if (!deployments) {
+    await api("workers", {
+      method: "POST",
+      body: { name: selected.worker },
+    });
+    await api(`scripts/${selected.worker}/subdomain`, {
+      method: "POST",
+      body: { enabled: true, previews_enabled: true },
+    });
+    return;
   }
-  const { result: settings } = await api(`scripts/${selected.worker}/subdomain`);
-  if (!settings?.previews_enabled) {
-    throw new Error(`Enable Preview URLs for the ${selected.worker} Worker`);
+
+  const settings = await api(`scripts/${selected.worker}/subdomain`, { missingOK: true });
+  if (!settings?.result?.enabled || !settings.result.previews_enabled) {
+    await api(`scripts/${selected.worker}/subdomain`, {
+      method: "POST",
+      body: { enabled: true, previews_enabled: true },
+    });
   }
 }
 
 async function deploymentTarget({ appName, production, repositoryId, prNumber, ...options }) {
-  if (!production) await requirePreviewReady({ appName, ...options });
   const account = await accountSubdomain(options);
+  if (!production) await ensurePreviewReady({ appName, ...options });
   const selectedPr = production ? undefined : positiveInteger(prNumber, "PR number");
   return {
     command: uploadCommand({ appName, production, repositoryId, prNumber: selectedPr }),
@@ -202,7 +219,7 @@ async function deletePreviewVersions({ repositoryId, prNumber, requireClosed = a
     deleted[appName] = 0;
     for (const version of candidates.values()) {
       await requireClosed();
-      await api(`workers/${selected.worker}/versions/${version.id}`, "DELETE");
+      await api(`workers/${selected.worker}/versions/${version.id}`, { method: "DELETE" });
       deleted[appName]++;
     }
   }

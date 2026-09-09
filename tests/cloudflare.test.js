@@ -147,6 +147,64 @@ describe("Cloudflare deployment lifecycle", () => {
     );
   });
 
+  test("creates an empty Worker before the first preview upload", async () => {
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      const parsed = new URL(url);
+      requests.push({
+        method: options.method,
+        path: parsed.pathname,
+        body: options.body && JSON.parse(options.body),
+      });
+      if (parsed.pathname.endsWith("/workers/subdomain")) {
+        return Response.json({ success: true, result: { subdomain: "example-account" } });
+      }
+      if (parsed.pathname.endsWith("/scripts/astro-monorepo-docs/deployments")) {
+        return Response.json(
+          { success: false, errors: [{ code: 10007, message: "Worker not found" }] },
+          { status: 404 },
+        );
+      }
+      return Response.json({ success: true, result: {} });
+    };
+
+    const target = await lifecycle.deploymentTarget({
+      appName: "docs",
+      production: false,
+      repositoryId: 1234,
+      prNumber: 7,
+      accountId: "account",
+      apiToken: "token",
+      fetchImpl,
+    });
+
+    expect(target.url).toBe(
+      "https://pr-7-astro-monorepo-docs.example-account.workers.dev",
+    );
+    expect(requests).toEqual([
+      {
+        method: "GET",
+        path: "/client/v4/accounts/account/workers/subdomain",
+        body: undefined,
+      },
+      {
+        method: "GET",
+        path: "/client/v4/accounts/account/workers/scripts/astro-monorepo-docs/deployments",
+        body: undefined,
+      },
+      {
+        method: "POST",
+        path: "/client/v4/accounts/account/workers/workers",
+        body: { name: "astro-monorepo-docs" },
+      },
+      {
+        method: "POST",
+        path: "/client/v4/accounts/account/workers/scripts/astro-monorepo-docs/subdomain",
+        body: { enabled: true, previews_enabled: true },
+      },
+    ]);
+  });
+
   test("production and preview jobs remain independent", () => {
     const preview = readWorkflow("preview");
     const production = readWorkflow("production");

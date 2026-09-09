@@ -211,11 +211,11 @@ Do not connect these Workers to Cloudflare Workers Builds or the Cloudflare GitH
 
 ### Production lifecycle
 
-`.github/workflows/cloudflare-production.yml` runs for pushes to `main` and can also be started manually with `main` selected. Docs and marketing build and deploy in parallel with `wrangler deploy`. The two Workers are created by the first production run, which must succeed before PR preview versions can be uploaded. Production can later be attached to a Cloudflare custom domain; these workflows intentionally use the predictable `workers.dev` addresses as the internal docs origin.
+`.github/workflows/cloudflare-production.yml` runs for pushes to `main` and can also be started manually with `main` selected. Docs and marketing build and deploy in parallel with `wrangler deploy`. Production can later be attached to a Cloudflare custom domain; these workflows intentionally use the predictable `workers.dev` addresses as the internal docs origin.
 
 ### Pull-request previews
 
-`.github/workflows/cloudflare-preview.yml` uploads, but does not deploy, one version to each production Worker for same-repository PRs. Both jobs build the same PR merge commit and run in parallel. Wrangler assigns the same `pr-<number>` alias to both versions:
+`.github/workflows/cloudflare-preview.yml` uploads, but does not deploy, one version to each long-lived Worker for same-repository PRs. Both jobs build the same PR merge commit and run in parallel. If either Worker does not exist yet, preview preparation creates its empty Worker container through Cloudflare's beta Workers API and enables its `workers.dev` preview URLs; it does not create a production deployment. Wrangler then assigns the same `pr-<number>` alias to both uploaded versions:
 
 ```text
 https://pr-123-astro-monorepo-marketing.<account-subdomain>.workers.dev
