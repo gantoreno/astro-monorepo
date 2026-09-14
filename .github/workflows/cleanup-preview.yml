@@ -24,7 +24,7 @@ jobs:
         uses: actions/github-script@v8
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_DOCS_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
           VERCEL_MARKETING_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -41,7 +41,7 @@ jobs:
               core.info("PR was reopened; leaving its preview unchanged.");
               return;
             }
-            for (const key of ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_DOCS_PROJECT_ID", "VERCEL_MARKETING_PROJECT_ID", "REPOSITORY_ID"]) {
+            for (const key of ["VERCEL_TOKEN", "VERCEL_ORG_ID", "VERCEL_DOCS_PROJECT_ID", "VERCEL_MARKETING_PROJECT_ID", "REPOSITORY_ID"]) {
               if (!env[key]) throw new Error(`Missing ${key}`);
             }
             if (!/^\d+$/.test(env.REPOSITORY_ID) || !Number.isSafeInteger(pullNumber) || pullNumber <= 0) {
@@ -49,7 +49,7 @@ jobs:
             }
             async function vercel(path, { method = "GET", query = {}, missingOK = false } = {}) {
               const url = new URL(path, "https://api.vercel.com");
-              url.search = new URLSearchParams({ teamId: env.VERCEL_TEAM_ID, ...query });
+              url.search = new URLSearchParams({ teamId: env.VERCEL_ORG_ID, ...query });
               const response = await fetch(url, {
                 method,
                 headers: { Authorization: `Bearer ${env.VERCEL_TOKEN}` },

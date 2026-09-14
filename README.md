@@ -96,7 +96,7 @@ In GitHub, open **Settings → Secrets and variables → Actions → New reposit
 | Repository secret | Value |
 | --- | --- |
 | `VERCEL_TOKEN` | A [Vercel access token](https://vercel.com/account/tokens) with access to both projects. |
-| `VERCEL_TEAM_ID` | The shared Vercel account/team ID (`orgId` in `.vercel/project.json`). |
+| `VERCEL_ORG_ID` | The shared Vercel account/team ID (`orgId` in `.vercel/project.json`). |
 | `VERCEL_DOCS_PROJECT_ID` | The docs project's ID (`projectId` in its link file). |
 | `VERCEL_MARKETING_PROJECT_ID` | The marketing project's ID (`projectId` in its link file). |
 
