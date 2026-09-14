@@ -91,14 +91,14 @@ The `docs` and `marketing` jobs build and deploy **in parallel** using `vercel p
 
 Each job runs in its own app directory with a fresh checkout, project ID, `vercel.json`, `.vercel/project.json`, and `.vercel/output`. Docs checks its public alias and marketing checks its own routes independently. There is no separate integration job or automated cross-app proxy check. Production workflow runs cannot overlap, although the two apps within each run deploy concurrently.
 
-In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
+In GitHub, open **Settings → Secrets and variables → Actions** and add:
 
-| Repository secret | Value |
-| --- | --- |
-| `VERCEL_TOKEN` | A [Vercel access token](https://vercel.com/account/tokens) with access to both projects. |
-| `VERCEL_ORG_ID` | The shared Vercel account/team ID (`orgId` in `.vercel/project.json`). |
-| `VERCEL_DOCS_PROJECT_ID` | The docs project's ID (`projectId` in its link file). |
-| `VERCEL_MARKETING_PROJECT_ID` | The marketing project's ID (`projectId` in its link file). |
+| Name | Type | Value |
+| --- | --- | --- |
+| `VERCEL_TOKEN` | Repository secret | A [Vercel access token](https://vercel.com/account/tokens) with access to both projects. |
+| `VERCEL_ORG_ID` | Repository variable | The shared Vercel account/team ID (`orgId` in `.vercel/project.json`). |
+| `VERCEL_DOCS_PROJECT_ID` | Repository variable | The docs project's ID (`projectId` in its link file). |
+| `VERCEL_MARKETING_PROJECT_ID` | Repository variable | The marketing project's ID (`projectId` in its link file). |
 
 Retrieve the IDs from the Vercel dashboard or run these commands **from the repository root** to link each app independently:
 
@@ -122,7 +122,7 @@ This uses [Vercel's CLI deployment flow for GitHub Actions](https://vercel.com/k
 
 ### Pull-request previews from GitHub Actions
 
-[`.github/workflows/deploy-preview.yml`](.github/workflows/deploy-preview.yml) creates previews when a PR targeting `main` is opened or reopened, and updates them whenever new commits are pushed. Draft PRs are included. It reuses the same four repository secrets and the same two Vercel projects; no extra Vercel projects or secrets are needed.
+[`.github/workflows/deploy-preview.yml`](.github/workflows/deploy-preview.yml) creates previews when a PR targeting `main` is opened or reopened, and updates them whenever new commits are pushed. Draft PRs are included. It reuses the same repository secret, three repository variables, and two Vercel projects; no extra Vercel projects or configuration values are needed.
 
 Each run checks out the same PR merge commit in both jobs:
 
@@ -132,19 +132,19 @@ Each run checks out the same PR merge commit in both jobs:
 
 Both aliases stay the same across updates, so their addresses are known before either deployment exists. The repository ID prevents naming collisions between repositories. No extra domain, DNS configuration, or secret is required. Vercel still creates deployment-specific URLs underneath, visible in deployment logs. Marketing follows the latest deployment assigned to that PR's docs alias. Shared preview links continue to use the marketing alias and its `/docs` path. Production domains remain unchanged. See [Vercel aliases](https://vercel.com/docs/cli/alias).
 
-The docs project's Deployment Protection must allow public access to **preview docs aliases**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. Keep the four credentials as repository secrets so they are available to both jobs. The comment uses the automatic `GITHUB_TOKEN` with `pull-requests: write`; no additional token or secret is needed. The workflow does not create GitHub deployment records or environments. Any records from earlier runs remain in GitHub history.
+The docs project's Deployment Protection must allow public access to **preview docs aliases**, just as it does for the production workflow's docs origin. Configure any app environment variables under **Preview** in the appropriate Vercel project. Keep the token as a repository secret and the three IDs as repository variables so they are available to both jobs. The comment uses the automatic `GITHUB_TOKEN` with `pull-requests: write`; no additional token or secret is needed. The workflow does not create GitHub deployment records or environments. Any records from earlier runs remain in GitHub history.
 
 Runs for the same PR are serialized so alias updates cannot overlap; different PRs deploy independently. Before moving either alias, the workflow checks that the PR is still open and the deployment matches its current head commit. Outdated reruns and runs for closed PRs fail that check without moving the alias. Closing or merging a PR runs the separate cleanup workflow described below. A failed marketing build or marketing route check leaves the previous marketing alias target and preview comment unchanged. Docs failures do not prevent marketing from publishing its link. Docs can update independently, so an existing preview may serve newer docs even when marketing fails. The preview link can be published before docs is available; check the docs job for its deployment status.
 
 To block merges until the preview is healthy, configure a `main` branch ruleset or branch protection rule to require the preview workflow's `docs` and `marketing` checks. The required deployment checks block merging if either app fails. Workflow YAML does not enable required checks by itself. Fork and Dependabot previews remain skipped, so use an appropriate separate CI policy for those contributions. See [GitHub required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging).
 
-Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel repository secrets. The deployment workflow uses `pull_request` to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
+Only PRs with branches in this repository deploy automatically. Fork PRs and Dependabot PRs are skipped because their workflows do not receive the Vercel token secret. The deployment workflow uses `pull_request` to avoid executing fork code with deployment credentials. See [GitHub's pull-request workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [Vercel's preview settings command](https://vercel.com/docs/cli/pull).
 
 ### Cleaning up closed PR previews
 
 [`.github/workflows/cleanup-preview.yml`](.github/workflows/cleanup-preview.yml) runs only on `pull_request_target: closed`, which includes merging a PR. It runs trusted inline code from `main`, with no checkout or execution of PR code. It does not add cleanup jobs to the preview workflow that runs when a PR is opened or updated. The cleanup workflow must reach `main` before it can handle closures. See [GitHub's event behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target).
 
-Both preview deploy commands tag Vercel deployments with `ciRepositoryId` and `ciPullRequest`. Cleanup validates ownership and removes both of the PR's permanent aliases (marketing and docs), then deletes matching preview deployments from both configured projects, including previous runs. It checks both metadata fields and the project ID, excludes production/promoted deployments, and updates the existing bot comment to **Preview closed**. It uses the same four repository secrets; no GitHub environment or deployment record is created.
+Both preview deploy commands tag Vercel deployments with `ciRepositoryId` and `ciPullRequest`. Cleanup validates ownership and removes both of the PR's permanent aliases (marketing and docs), then deletes matching preview deployments from both configured projects, including previous runs. It checks both metadata fields and the project ID, excludes production/promoted deployments, and updates the existing bot comment to **Preview closed**. It uses the same repository secret and three repository variables; no GitHub environment or deployment record is created.
 
 Cleanup and deployment share the same per-PR concurrency group. Cleanup rechecks that the PR is closed before deleting, while preview runs reject closed or outdated PRs before deploying. Reopening the PR creates a new pair at the same permanent URL. Rerunning cleanup tolerates an alias or deployment that has already been removed; other API errors fail the run so it can be retried. Deployments created before the tags were added remain untouched, as do historical GitHub deployment records.
 
