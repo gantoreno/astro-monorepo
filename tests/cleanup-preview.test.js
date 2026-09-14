@@ -8,7 +8,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const execute = new AsyncFunction("github", "context", "core", "process", "fetch", script);
 const env = {
   VERCEL_TOKEN: "test-token",
-  VERCEL_ORG_ID: "team-test",
+  VERCEL_TEAM_ID: "team-test",
   VERCEL_DOCS_PROJECT_ID: "prj-docs",
   VERCEL_MARKETING_PROJECT_ID: "prj-marketing",
   REPOSITORY_ID: "1234",

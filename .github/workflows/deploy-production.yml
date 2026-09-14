@@ -32,7 +32,7 @@ jobs:
         working-directory: apps/docs
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
       - name: Check deployment secrets
         run: |
           : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
-          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository secret}"
+          : "${VERCEL_TEAM_ID:?Set the VERCEL_TEAM_ID repository secret}"
           : "${VERCEL_PROJECT_ID:?Set the VERCEL_DOCS_PROJECT_ID repository secret}"
       - name: Install Vercel CLI
         run: npm install --global "vercel@$VERCEL_CLI_VERSION"
@@ -85,7 +85,7 @@ jobs:
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          vercel alias set "$DEPLOYMENT_URL" "${DOCS_URL#https://}" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel alias set "$DEPLOYMENT_URL" "${DOCS_URL#https://}" --scope "$VERCEL_TEAM_ID" --token="$VERCEL_TOKEN"
           printf 'Docs: %s/docs\n' "$DOCS_URL" >> "$GITHUB_STEP_SUMMARY"
       - name: Check docs is publicly accessible
         run: |
@@ -104,7 +104,7 @@ jobs:
         working-directory: apps/marketing
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_MARKETING_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +117,7 @@ jobs:
       - name: Check deployment secrets
         run: |
           : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
-          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository secret}"
+          : "${VERCEL_TEAM_ID:?Set the VERCEL_TEAM_ID repository secret}"
           : "${VERCEL_PROJECT_ID:?Set the VERCEL_MARKETING_PROJECT_ID repository secret}"
       - name: Install Vercel CLI
         run: npm install --global "vercel@$VERCEL_CLI_VERSION"
